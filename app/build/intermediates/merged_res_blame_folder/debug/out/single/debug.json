@@ -1,0 +1,18 @@
+[
+    {
+        "merged": "/Users/bkallaus/.gradle/daemon/8.6/com.example.androidmouse.app-merged_res-31:/drawable_cursor.xml.flat",
+        "source": "/Users/bkallaus/.gradle/daemon/8.6/com.example.androidmouse.app-main-33:/drawable/cursor.xml"
+    },
+    {
+        "merged": "com.example.androidmouse.app-merged_res-31:/layout_activity_trackpad.xml.flat",
+        "source": "com.example.androidmouse.app-main-33:/layout/activity_trackpad.xml"
+    },
+    {
+        "merged": "/Users/bkallaus/.gradle/daemon/8.6/com.example.androidmouse.app-merged_res-31:/layout_activity_trackpad.xml.flat",
+        "source": "/Users/bkallaus/.gradle/daemon/8.6/com.example.androidmouse.app-main-33:/layout/activity_trackpad.xml"
+    },
+    {
+        "merged": "/Users/bkallaus/.gradle/daemon/8.6/com.example.androidmouse.app-merged_res-31:/xml_accessibility_service_config.xml.flat",
+        "source": "/Users/bkallaus/.gradle/daemon/8.6/com.example.androidmouse.app-main-33:/xml/accessibility_service_config.xml"
+    }
+]

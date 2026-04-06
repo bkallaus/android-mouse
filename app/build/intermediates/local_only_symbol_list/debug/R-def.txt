@@ -1,0 +1,15 @@
+R_DEF: Internal format may change without notice
+local
+dimen cursor_size
+drawable cursor
+id btn_accessibility
+id btn_back
+id btn_home
+id btn_recents
+id display_spinner
+id sensitivity_seekbar
+id status_text
+layout activity_trackpad
+string accessibility_description
+string app_name
+xml accessibility_service_config
