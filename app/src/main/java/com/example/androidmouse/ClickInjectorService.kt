@@ -35,6 +35,8 @@ class ClickInjectorService : AccessibilityService() {
     private var displayHeight = 1080
 
     private var currentDragStroke: GestureDescription.StrokeDescription? = null
+    private var gestureX = 0f
+    private var gestureY = 0f
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -208,9 +210,12 @@ class ClickInjectorService : AccessibilityService() {
     private fun handleDragEvent(event: TrackpadEventBus.DragEvent) {
         when (event.action) {
             TrackpadEventBus.DragAction.START -> {
-                val path = Path().apply { moveTo(currentX, currentY) }
+                gestureX = currentX
+                gestureY = currentY
+                val path = Path().apply { moveTo(gestureX, gestureY) }
                 // Gesture with isContinued = true to allow for multiple movements
-                currentDragStroke = GestureDescription.StrokeDescription(path, 0, 100, true)
+                // We use a small duration for the initial point
+                currentDragStroke = GestureDescription.StrokeDescription(path, 0, 10, true)
                 val builder = GestureDescription.Builder().addStroke(currentDragStroke!!)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     builder.setDisplayId(externalDisplayId)
@@ -218,15 +223,32 @@ class ClickInjectorService : AccessibilityService() {
                 dispatchGesture(builder.build(), null, null)
             }
             TrackpadEventBus.DragAction.MOVE -> {
-                currentX += event.dx
-                currentY += event.dy
-                currentX = currentX.coerceIn(0f, displayWidth.toFloat() - 1f)
-                currentY = currentY.coerceIn(0f, displayHeight.toFloat() - 1f)
-                updateCursorPosition()
+                val oldX = gestureX
+                val oldY = gestureY
+
+                if (event.isScroll) {
+                    // Scrolling: Move the gesture path, but keep cursor in place
+                    // Note: Inverting dy for natural scroll feel if needed, but let's keep it direct for now
+                    gestureX += event.dx
+                    gestureY += event.dy
+                } else {
+                    // Resizing/Dragging: Move both cursor and gesture path
+                    currentX += event.dx
+                    currentY += event.dy
+                    currentX = currentX.coerceIn(0f, displayWidth.toFloat() - 1f)
+                    currentY = currentY.coerceIn(0f, displayHeight.toFloat() - 1f)
+                    updateCursorPosition()
+                    gestureX = currentX
+                    gestureY = currentY
+                }
 
                 currentDragStroke?.let { stroke ->
-                    val path = Path().apply { moveTo(currentX, currentY) }
-                    val nextStroke = stroke.continueStroke(path, 0, 100, true)
+                    val path = Path().apply {
+                        moveTo(oldX, oldY)
+                        lineTo(gestureX, gestureY)
+                    }
+                    // Use a short duration for MOVE segments to keep it responsive
+                    val nextStroke = stroke.continueStroke(path, 0, 20, true)
                     currentDragStroke = nextStroke
                     val builder = GestureDescription.Builder().addStroke(nextStroke)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -237,7 +259,8 @@ class ClickInjectorService : AccessibilityService() {
             }
             TrackpadEventBus.DragAction.STOP -> {
                 currentDragStroke?.let { stroke ->
-                    val path = Path().apply { moveTo(currentX, currentY) }
+                    val path = Path().apply { moveTo(gestureX, gestureY) }
+                    // Final segment with isContinued = false
                     val lastStroke = stroke.continueStroke(path, 0, 10, false)
                     val builder = GestureDescription.Builder().addStroke(lastStroke)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

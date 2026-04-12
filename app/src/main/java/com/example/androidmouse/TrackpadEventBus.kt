@@ -59,7 +59,12 @@ object TrackpadEventBus {
     val keyEvents = _keyEvents.asSharedFlow()
 
     enum class DragAction { START, MOVE, STOP }
-    data class DragEvent(val action: DragAction, val dx: Float = 0f, val dy: Float = 0f)
+    data class DragEvent(
+        val action: DragAction,
+        val dx: Float = 0f,
+        val dy: Float = 0f,
+        val isScroll: Boolean = false
+    )
 
     fun sendMoveEvent(dx: Float, dy: Float) {
         _moveEvents.tryEmit(Pair(dx, dy))
@@ -77,8 +82,8 @@ object TrackpadEventBus {
         _displayChangeEvents.tryEmit(displayId)
     }
 
-    fun sendDragEvent(action: DragAction, dx: Float = 0f, dy: Float = 0f) {
-        _dragEvents.tryEmit(DragEvent(action, dx, dy))
+    fun sendDragEvent(action: DragAction, dx: Float = 0f, dy: Float = 0f, isScroll: Boolean = false) {
+        _dragEvents.tryEmit(DragEvent(action, dx, dy, isScroll))
     }
 
     fun sendTextEvent(text: String) {

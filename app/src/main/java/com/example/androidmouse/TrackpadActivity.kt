@@ -45,7 +45,7 @@ class TrackpadActivity : Activity() {
     private val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val longPressRunnable = Runnable {
         isLongPress = true
-        TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START)
+        TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START, isScroll = false)
         // Feedback
         window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
     }
@@ -259,7 +259,7 @@ class TrackpadActivity : Activity() {
                     isLongPress = false
                     longPressHandler.removeCallbacks(longPressRunnable)
                     
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START)
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START, isScroll = true)
                     // Feedback
                     window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                     
@@ -284,8 +284,10 @@ class TrackpadActivity : Activity() {
                 val dx = (currentX - lastX) * sensitivity
                 val dy = (currentY - lastY) * sensitivity
 
-                if (isTwoFinger || isLongPress) {
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy)
+                if (isTwoFinger) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy, isScroll = true)
+                } else if (isLongPress) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy, isScroll = false)
                 } else {
                     if (dx != 0f || dy != 0f) {
                         TrackpadEventBus.sendMoveEvent(dx, dy)
@@ -302,13 +304,17 @@ class TrackpadActivity : Activity() {
                 return true
             }
             MotionEvent.ACTION_POINTER_UP -> {
-                if (isTwoFinger && event.pointerCount < 2) {
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP)
+                if (isTwoFinger) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
                     isTwoFinger = false
                     // Update lastX/lastY to the remaining finger to prevent jump
                     val remainingIndex = if (event.actionIndex == 0) 1 else 0
-                    lastX = event.getX(remainingIndex)
-                    lastY = event.getY(remainingIndex)
+                    try {
+                        lastX = event.getX(remainingIndex)
+                        lastY = event.getY(remainingIndex)
+                    } catch (e: Exception) {
+                        // In case the index is invalid for some reason
+                    }
                 }
                 return true
             }
@@ -317,8 +323,10 @@ class TrackpadActivity : Activity() {
                 val upTime = System.currentTimeMillis()
                 val tapTimeout = ViewConfiguration.getTapTimeout().toLong()
                 
-                if (isLongPress || isTwoFinger) {
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP)
+                if (isLongPress) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = false)
+                } else if (isTwoFinger) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
                 } else if (isTap && (upTime - downTime) <= tapTimeout) {
                     TrackpadEventBus.sendTapEvent()
                 }
@@ -329,8 +337,10 @@ class TrackpadActivity : Activity() {
             }
             MotionEvent.ACTION_CANCEL -> {
                 longPressHandler.removeCallbacks(longPressRunnable)
-                if (isLongPress || isTwoFinger) {
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP)
+                if (isLongPress) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = false)
+                } else if (isTwoFinger) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
                 }
                 isTwoFinger = false
                 isLongPress = false
