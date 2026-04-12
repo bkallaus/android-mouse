@@ -12,7 +12,9 @@ import android.view.Display
 import android.view.Gravity
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageView
+import android.os.Bundle
 import kotlinx.coroutines.*
 import kotlin.math.abs
 
@@ -139,6 +141,55 @@ class ClickInjectorService : AccessibilityService() {
                 performGlobalAction(action)
             }
         }
+        serviceScope.launch {
+            TrackpadEventBus.textEvents.collect { text ->
+                injectText(text)
+            }
+        }
+    }
+
+    private fun injectText(text: String) {
+        val focusedNode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val windowsByDisplay = getWindowsOnAllDisplays()
+            val windows = windowsByDisplay[externalDisplayId]
+            var found: AccessibilityNodeInfo? = null
+            windows?.forEach { window ->
+                if (found == null) {
+                    val root = window.root
+                    if (root != null) {
+                        found = findFocusedNode(root)
+                    }
+                }
+            }
+            found
+        } else {
+            findFocusedNode(rootInActiveWindow)
+        }
+
+        if (focusedNode != null) {
+            val arguments = Bundle()
+            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        } else {
+            Log.d("ClickInjectorService", "No focused node found to inject text")
+        }
+    }
+
+    private fun findFocusedNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (root == null) return null
+        
+        // Check if root itself is focused
+        if (root.isFocused) return root
+        
+        // Search children
+        for (i in 0 until root.childCount) {
+            val child = root.getChild(i)
+            val focused = findFocusedNode(child)
+            if (focused != null) {
+                return focused
+            }
+        }
+        return null
     }
 
     private fun updateCursorPosition() {

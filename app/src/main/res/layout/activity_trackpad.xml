@@ -8,9 +8,9 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text="Trackpad Area"
-        android:textColor="#444444"
-        android:textSize="24sp"
+        android:text="Trackpad"
+        android:textColor="#333333"
+        android:textSize="32sp"
         android:textStyle="bold" />
 
     <LinearLayout
@@ -28,67 +28,50 @@
             android:orientation="horizontal">
 
             <Button
-                android:id="@+id/btn_back"
-                style="@style/Widget.AppCompat.Button.Borderless"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Back"
-                android:textColor="#FFFFFF" />
-
-            <Button
-                android:id="@+id/btn_home"
-                style="@style/Widget.AppCompat.Button.Borderless"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Home"
-                android:textColor="#FFFFFF" />
-
-            <Button
                 android:id="@+id/btn_recents"
                 style="@style/Widget.AppCompat.Button.Borderless"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="Menu"
                 android:textColor="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btn_keyboard"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Keyboard"
+                android:src="@drawable/ic_keyboard"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btn_settings"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Settings"
+                android:src="@drawable/ic_settings"
+                android:tint="#FFFFFF" />
         </LinearLayout>
 
-        <Spinner
-            android:id="@+id/display_spinner"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:backgroundTint="#FFFFFF" />
+        <!-- Hidden EditText to trigger keyboard -->
+        <EditText
+            android:id="@+id/hidden_edit_text"
+            android:layout_width="1dp"
+            android:layout_height="1dp"
+            android:alpha="0"
+            android:importantForAutofill="no"
+            android:inputType="textNoSuggestions"
+            android:imeOptions="actionSend" />
 
         <TextView
             android:id="@+id/status_text"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Move finger to control cursor\nTap to click"
             android:textAlignment="center"
             android:textColor="#888888"
-            android:textSize="14sp" />
-
-        <LinearLayout
-            android:layout_width="250dp"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:orientation="vertical">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_horizontal"
-                android:text="Sensitivity"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp" />
-
-            <SeekBar
-                android:id="@+id/sensitivity_seekbar"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:max="100"
-                android:progress="50" />
-        </LinearLayout>
+            android:textSize="14sp"
+            android:visibility="gone" />
 
         <Button
             android:id="@+id/btn_accessibility"

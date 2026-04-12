@@ -22,6 +22,12 @@ import android.widget.TextView
 import android.content.Context
 import android.hardware.display.DisplayManager
 import android.view.Display
+import android.app.AlertDialog
+import android.view.LayoutInflater
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import android.widget.ImageButton
 import androidx.core.content.edit
 import kotlin.math.abs
 
@@ -61,67 +67,110 @@ class TrackpadActivity : Activity() {
             startActivity(intent)
         }
 
-        findViewById<View>(R.id.btn_back).setOnClickListener {
-            TrackpadEventBus.sendGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-        }
-        findViewById<View>(R.id.btn_home).setOnClickListener {
-            TrackpadEventBus.sendGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
-        }
         findViewById<View>(R.id.btn_recents).setOnClickListener {
             TrackpadEventBus.sendGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
         }
 
-        setupDisplaySpinner()
-        setupSensitivitySlider()
+        findViewById<ImageButton>(R.id.btn_settings).setOnClickListener {
+            showSettingsDialog()
+        }
+
+        setupKeyboard()
     }
 
-    private fun setupSensitivitySlider() {
-        val sharedPrefs = getSharedPreferences("trackpad_prefs", Context.MODE_PRIVATE)
-        sensitivity = sharedPrefs.getFloat("sensitivity", 1.0f)
-        
-        val seekBar = findViewById<SeekBar>(R.id.sensitivity_seekbar)
-        // SeekBar is 0-100, we want sensitivity to be roughly 0.1 to 3.0
-        // (progress + 10) / 50.0f -> if progress is 40, sensitivity is 1.0
-        seekBar.progress = (sensitivity * 50f - 10f).toInt().coerceIn(0, 100)
-        
-        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                sensitivity = (progress + 10) / 50.0f
-                sharedPrefs.edit { putFloat("sensitivity", sensitivity) }
-            }
+    private fun showSettingsDialog() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_settings, null)
+        val spinner = dialogView.findViewById<Spinner>(R.id.dialog_display_spinner)
+        val seekBar = dialogView.findViewById<SeekBar>(R.id.dialog_sensitivity_seekbar)
 
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
-        })
-    }
-
-    private fun setupDisplaySpinner() {
+        // Setup Spinner
         val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         val displays = displayManager.displays
         val displayNames = displays.map { "${it.name} (ID: ${it.displayId})" }
-        
         val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, displayNames)
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        
-        val spinner = findViewById<Spinner>(R.id.display_spinner)
         spinner.adapter = adapter
+
+        val currentDisplayIndex = displays.indexOfFirst { it.displayId == getSharedPreferences("trackpad_prefs", Context.MODE_PRIVATE).getInt("last_display_id", -1) }
+        if (currentDisplayIndex != -1) {
+            spinner.setSelection(currentDisplayIndex)
+        } else {
+            val externalIndex = displays.indexOfFirst { it.displayId != Display.DEFAULT_DISPLAY }
+            if (externalIndex != -1) spinner.setSelection(externalIndex)
+        }
+
+        // Setup Sensitivity
+        val sharedPrefs = getSharedPreferences("trackpad_prefs", Context.MODE_PRIVATE)
+        sensitivity = sharedPrefs.getFloat("sensitivity", 1.0f)
+        seekBar.progress = (sensitivity * 50f - 10f).toInt().coerceIn(0, 100)
+
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar)
+            .setView(dialogView)
+            .create()
+
+        dialog.show()
         
-        // Find current display ID from service if it's already running, 
-        // but for now just default to what the service picks.
-        // Actually, let's just pick the first external one as default in UI if it exists.
-        val externalIndex = displays.indexOfFirst { it.displayId != Display.DEFAULT_DISPLAY }
-        if (externalIndex != -1) {
-            spinner.setSelection(externalIndex)
+        // Make the dialog wider
+        dialog.window?.let { window ->
+            val params = window.attributes
+            params.width = WindowManager.LayoutParams.MATCH_PARENT
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT
+            window.attributes = params
         }
 
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selectedDisplay = displays[position]
                 TrackpadEventBus.sendDisplayChangeEvent(selectedDisplay.displayId)
+                sharedPrefs.edit { putInt("last_display_id", selectedDisplay.displayId) }
             }
-
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                sensitivity = (progress + 10) / 50.0f
+                sharedPrefs.edit { putFloat("sensitivity", sensitivity) }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
+        dialog.show()
+
+        dialogView.findViewById<View>(R.id.btn_close_settings).setOnClickListener {
+            dialog.dismiss()
+        }
+    }
+
+    private fun setupKeyboard() {
+        val hiddenEditText = findViewById<EditText>(R.id.hidden_edit_text)
+        val btnKeyboard = findViewById<ImageButton>(R.id.btn_keyboard)
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+
+        btnKeyboard.setOnClickListener {
+            hiddenEditText.requestFocus()
+            imm.showSoftInput(hiddenEditText, InputMethodManager.SHOW_IMPLICIT)
+        }
+
+        hiddenEditText.setOnEditorActionListener { v, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEND || actionId == EditorInfo.IME_ACTION_DONE) {
+                val text = v.text.toString()
+                if (text.isNotEmpty()) {
+                    TrackpadEventBus.sendTextEvent(text)
+                    v.text = ""
+                }
+                // Optional: hide keyboard after sending? 
+                // imm.hideSoftInputFromWindow(v.windowToken, 0)
+                true
+            } else {
+                false
+            }
+        }
+        
+        // Listen for backspace if the field is empty? 
+        // That's tricky with ACTION_SET_TEXT on the other side.
+        // For now, let's focus on sending blocks of text.
     }
 
     override fun onResume() {

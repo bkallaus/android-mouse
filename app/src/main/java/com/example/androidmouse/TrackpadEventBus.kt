@@ -44,6 +44,20 @@ object TrackpadEventBus {
     )
     val dragEvents = _dragEvents.asSharedFlow()
 
+    // Shared flow to send text to be injected
+    private val _textEvents = MutableSharedFlow<String>(
+        extraBufferCapacity = 10,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val textEvents = _textEvents.asSharedFlow()
+
+    // Shared flow to send special key events (e.g. Enter, Backspace)
+    private val _keyEvents = MutableSharedFlow<Int>(
+        extraBufferCapacity = 10,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val keyEvents = _keyEvents.asSharedFlow()
+
     enum class DragAction { START, MOVE, STOP }
     data class DragEvent(val action: DragAction, val dx: Float = 0f, val dy: Float = 0f)
 
@@ -65,5 +79,13 @@ object TrackpadEventBus {
 
     fun sendDragEvent(action: DragAction, dx: Float = 0f, dy: Float = 0f) {
         _dragEvents.tryEmit(DragEvent(action, dx, dy))
+    }
+
+    fun sendTextEvent(text: String) {
+        _textEvents.tryEmit(text)
+    }
+
+    fun sendKeyEvent(keyCode: Int) {
+        _keyEvents.tryEmit(keyCode)
     }
 }
