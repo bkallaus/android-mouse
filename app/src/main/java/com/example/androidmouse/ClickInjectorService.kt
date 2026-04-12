@@ -78,9 +78,9 @@ class ClickInjectorService : AccessibilityService() {
 
             val displayContext = createDisplayContext(targetDisplay)
             windowManager = displayContext.getSystemService(WINDOW_SERVICE) as WindowManager
-            cursorSize = resources.getDimensionPixelSize(R.dimen.cursor_size)
+            cursorSize = displayContext.resources.getDimensionPixelSize(R.dimen.cursor_size)
 
-            cursorView = ImageView(this).apply {
+            cursorView = ImageView(displayContext).apply {
                 setImageResource(R.drawable.cursor)
                 alpha = 1.0f
             }
@@ -137,6 +137,7 @@ class ClickInjectorService : AccessibilityService() {
         }
         serviceScope.launch {
             TrackpadEventBus.globalActions.collect { action ->
+                // Ensure the target display/window has focus before performing the global action
                 performClick(currentX, currentY, externalDisplayId)
                 delay(200)
 
@@ -148,50 +149,66 @@ class ClickInjectorService : AccessibilityService() {
                 injectText(text)
             }
         }
+        serviceScope.launch {
+            TrackpadEventBus.keyEvents.collect { keyCode ->
+                handleKeyEvent(keyCode)
+            }
+        }
     }
 
-    private fun injectText(text: String) {
-        val focusedNode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+    private fun handleKeyEvent(keyCode: Int) {
+        val focusedNode = getFocusedNode()
+        if (focusedNode != null) {
+            when (keyCode) {
+                android.view.KeyEvent.KEYCODE_ENTER -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        focusedNode.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                    } else {
+                        // Fallback or skip for older versions
+                    }
+                }
+            }
+            @Suppress("DEPRECATION")
+            focusedNode.recycle()
+        }
+    }
+
+    private fun getFocusedNode(): AccessibilityNodeInfo? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val windowsByDisplay = getWindowsOnAllDisplays()
             val windows = windowsByDisplay[externalDisplayId]
             var found: AccessibilityNodeInfo? = null
             windows?.forEach { window ->
                 if (found == null) {
                     val root = window.root
-                    if (root != null) {
-                        found = findFocusedNode(root)
-                    }
+                    found = root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                    @Suppress("DEPRECATION")
+                    root?.recycle()
                 }
             }
             found
         } else {
-            findFocusedNode(rootInActiveWindow)
-        }
-
-        if (focusedNode != null) {
-            val arguments = Bundle()
-            arguments.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-        } else {
-            Log.d("ClickInjectorService", "No focused node found to inject text")
+            val root = rootInActiveWindow
+            val found = root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            @Suppress("DEPRECATION")
+            root?.recycle()
+            found
         }
     }
 
-    private fun findFocusedNode(root: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-        if (root == null) return null
-        
-        // Check if root itself is focused
-        if (root.isFocused) return root
-        
-        // Search children
-        for (i in 0 until root.childCount) {
-            val child = root.getChild(i)
-            val focused = findFocusedNode(child)
-            if (focused != null) {
-                return focused
+    private fun injectText(text: String) {
+        val focusedNode = getFocusedNode()
+
+        if (focusedNode != null) {
+            val arguments = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
+            focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+            @Suppress("DEPRECATION")
+            focusedNode.recycle()
+        } else {
+            Log.d("ClickInjectorService", "No focused node found to inject text")
         }
-        return null
     }
 
     private fun updateCursorPosition() {
@@ -313,6 +330,13 @@ class ClickInjectorService : AccessibilityService() {
     }
     
     override fun onDestroy() {
+        cursorView?.let {
+            try {
+                windowManager?.removeView(it)
+            } catch (e: Exception) {
+                Log.e("ClickInjectorService", "Error removing cursor on destroy", e)
+            }
+        }
         super.onDestroy()
         serviceScope.cancel()
     }
