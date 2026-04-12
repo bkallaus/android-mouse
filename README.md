@@ -1,56 +1,37 @@
-# Android Mouse
+# 🖱️ Android Mouse
 
-This project provides the core boilerplate to turn an Android device into a hardware-free trackpad that controls a secondary external display using Android's native Accessibility and Overlay capabilities.
+[![Android API 30+](https://img.shields.io/badge/API-30%2B-brightgreen.svg?style=flat)](#)
+[![Kotlin](https://img.shields.io/badge/Kotlin-1.8.0-blue.svg?logo=kotlin)](#)
 
-## Architecture Structure
-The application communicates in real-time through a highly performant `TrackpadEventBus` (Kotlin Coroutines `SharedFlow`) and comprises three primary components:
-1. **TrackpadActivity**: The blank full-screen activity acting as the touch surface. Calculates X/Y deltas and detects quick taps.
-2. **CursorOverlayService**: Detects the secondary display using `DisplayManager`, scopes a new `WindowContext`, and uses `SYSTEM_ALERT_WINDOW` logic to draw a floating cursor. Tracks real-time absolute screen coordinates.
-3. **ClickInjectorService**: An `AccessibilityService` that observes tap commands from the EventBus, acquires absolute screen coordinates from the OverlayService, and uses `dispatchGesture()` specifically routed to the external display.
+**Turn your Android device into a hardware-free trackpad for external displays.**
 
-## Build Instructions 
+Have you ever plugged your phone into an external monitor for Desktop Mode, only to realize you left your Bluetooth mouse at home? **Android Mouse** is the solution. It transforms your device's screen into a responsive, highly-performant trackpad that natively controls an on-screen cursor on secondary displays.
 
-The provided files are source-level boilerplate files. To build and compile this properly into a functioning Android Application:
+No root required. Native Android APIs. Pure Kotlin.
 
-### 1. Project Setup
-1. Open **Android Studio**.
-2. Select **File > New > New Project**, choose **Empty Activity**, and click Next.
-3. Set Name to **Android Mouse** and Language to **Kotlin**.
-4. Set Minimum SDK to **API 30** (Android 11.0) because routing a `GestureDescription` to an external display requires API 30+.
-5. Click **Finish**.
+## ✨ Features
 
-### 2. Copy Source Files
-Move or copy the generated files from this `android-mouse` directory directly into your new Android Studio project. 
-* *Copy the `.kt` files into your `app/src/main/java/com/example/androidmouse/` directory.*
-* *Replace your existing `AndroidManifest.xml` with the provided one.*
-* *Place `accessibility_service_config.xml` into the `app/src/main/res/xml/` directory.*
+- **Zero-Latency Movement:** Built on a highly performant `SharedFlow` Coroutines Event Bus.
+- **Native Implementation:** Uses built-in Android Overlay and Accessibility APIs—no sketchy third-party input injectors.
+- **External Display Support:** Specifically designed to route gestures and render UI on external hardware/monitors via `DisplayManager`.
+- **System-Wide Clicks:** Injects standard swipe and tap events directly into the Android framework.
 
-### 3. Add Resources & Dependencies
-Open your app-level `build.gradle.kts` file and ensure Kotlin Coroutines are included in your dependencies:
-```kotlin
-dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
-    // ...other standard dependencies
-}
-```
+## 🏗️ How it Works
 
-Open `app/src/main/res/values/strings.xml` and add the string referenced by the accessibility config:
-```xml
-<resources>
-    <string name="app_name">Android Mouse</string>
-    <string name="accessibility_description">Android Mouse Click Injector</string>
-</resources>
-```
+The magic happens across three decoupled, high-performance components:
 
-Sync your Gradle project.
+1. **Trackpad Activity:** A blank, immersive-mode full-screen surface that calculates precise X/Y finger deltas and detects quick tap gestures.
+2. **Cursor Overlay:** A specialized `SYSTEM_ALERT_WINDOW` scoped to the secondary display that smoothly renders and tracks a floating cursor in real-time.
+3. **Click Injector:** An `AccessibilityService` that observes tap commands from the Event Bus and dispatches click gestures directly to the external monitor framework.
 
-### 4. Build and Run
-1. Connect your Android device via USB/Wi-Fi debugging.
-2. Click **Run** (`Shift + F10`) in Android Studio.
 
-## Device Permissions Setup
+## 🔒 Device Permissions
+
 Because this application simulates mouse input and overlays UI on an external screen, Android restricts it. **You must manually grant these permissions before the application will work:**
-1. **Overlay Permission**: Open your device Settings app > Apps > Special app access > **Display over other apps**. Find "Android Mouse" and toggle it **ON**.
-2. **Accessibility Permission**: Open your device Settings app > Accessibility > Downloaded apps (or Installed services). Find "Android Mouse" and toggle **Use Android Mouse** to **ON**.
-3. Assure your device is plugged into an external monitor (Desktop Mode). Launch the main Trackpad Activity on the primary device screen.
+
+1. **Draw Over Other Apps:** Open Settings > Apps > Special app access > **Display over other apps**. Find "Android Mouse" and toggle it **ON**.
+2. **Accessibility Access:** Open Settings > Accessibility > Downloaded apps (or Installed services). Find "Android Mouse" and toggle it to **ON**.
+3. **Ready to go!** Ensure your device is connected to an external monitor (Desktop Mode) and launch the main Trackpad Activity to start controlling your screen.
+
+---
+*Built for the future of mobile productivity.*

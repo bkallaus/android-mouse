@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 object TrackpadEventBus {
     // Shared flow to send X and Y deltas from the Trackpad to the Overlay
     private val _moveEvents = MutableSharedFlow<Pair<Float, Float>>(
-        extraBufferCapacity = 1,
+        extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val moveEvents = _moveEvents.asSharedFlow()
@@ -39,7 +39,7 @@ object TrackpadEventBus {
 
     // Shared flow to send drag events
     private val _dragEvents = MutableSharedFlow<DragEvent>(
-        extraBufferCapacity = 1,
+        extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val dragEvents = _dragEvents.asSharedFlow()

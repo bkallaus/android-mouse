@@ -110,9 +110,7 @@ class TrackpadActivity : Activity() {
             .setView(dialogView)
             .create()
 
-        dialog.show()
-        
-        // Make the dialog wider
+        // Make the dialog wider (set before show to avoid flicker)
         dialog.window?.let { window ->
             val params = window.attributes
             params.width = WindowManager.LayoutParams.MATCH_PARENT
@@ -120,8 +118,13 @@ class TrackpadActivity : Activity() {
             window.attributes = params
         }
 
+        // Guard against spinner auto-firing onItemSelected on attach
+        var userInitiatedSpinner = false
+        spinner.post { userInitiatedSpinner = true }
+
         spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!userInitiatedSpinner) return
                 val selectedDisplay = displays[position]
                 TrackpadEventBus.sendDisplayChangeEvent(selectedDisplay.displayId)
                 sharedPrefs.edit { putInt(TrackpadConstants.KEY_LAST_DISPLAY_ID, selectedDisplay.displayId) }
@@ -132,10 +135,11 @@ class TrackpadActivity : Activity() {
         seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 sensitivity = (progress + 10) / 50.0f
-                sharedPrefs.edit { putFloat(TrackpadConstants.KEY_SENSITIVITY, sensitivity) }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                sharedPrefs.edit { putFloat(TrackpadConstants.KEY_SENSITIVITY, sensitivity) }
+            }
         })
 
         dialog.show()
@@ -193,6 +197,7 @@ class TrackpadActivity : Activity() {
 
         val statusText = findViewById<TextView>(R.id.status_text)
         val accessibilityButton = findViewById<Button>(R.id.btn_accessibility)
+        statusText.visibility = View.VISIBLE
 
         if (!overlayPermission) {
             Log.d("TrackpadActivity", "Overlay permission missing")
@@ -314,14 +319,12 @@ class TrackpadActivity : Activity() {
             }
             MotionEvent.ACTION_UP -> {
                 longPressHandler.removeCallbacks(longPressRunnable)
-                val upTime = System.currentTimeMillis()
-                val tapTimeout = ViewConfiguration.getTapTimeout().toLong()
                 
                 if (isLongPress) {
                     TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = false)
                 } else if (isTwoFinger) {
                     TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
-                } else if (isTap && (upTime - downTime) <= tapTimeout) {
+                } else if (isTap) {
                     TrackpadEventBus.sendTapEvent()
                 }
                 
@@ -342,5 +345,10 @@ class TrackpadActivity : Activity() {
             }
         }
         return super.onTouchEvent(event)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        longPressHandler.removeCallbacks(longPressRunnable)
     }
 }

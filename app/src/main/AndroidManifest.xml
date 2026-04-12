@@ -26,17 +26,7 @@
             </intent-filter>
         </activity>
 
-        <!-- 2. The Fake Cursor Overlay Service -->
-        <service
-            android:name=".CursorOverlayService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Virtual cursor overlay for external display" />
-        </service>
-
-        <!-- 3. The Click Injector Accessibility Service -->
+        <!-- 2. The Click Injector Accessibility Service -->
         <service
             android:name=".ClickInjectorService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"

@@ -372,6 +372,7 @@ class ClickInjectorService : AccessibilityService() {
     }
     
     override fun onDestroy() {
+        serviceScope.cancel()
         cursorView?.let {
             try {
                 windowManager?.removeView(it)
@@ -380,6 +381,5 @@ class ClickInjectorService : AccessibilityService() {
             }
         }
         super.onDestroy()
-        serviceScope.cancel()
     }
 }
