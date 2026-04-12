@@ -33,6 +33,16 @@ class TrackpadActivity : Activity() {
     private var lastY = 0f
     private var downTime = 0L
     private var isTap = false
+    private var isLongPress = false
+    private var isTwoFinger = false
+    private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
+    private val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val longPressRunnable = Runnable {
+        isLongPress = true
+        TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START)
+        // Feedback
+        window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+    }
 
     private var touchSlop = 0
     private var sensitivity = 1.0f
@@ -180,7 +190,7 @@ class TrackpadActivity : Activity() {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.action) {
+        when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 startX = event.x
                 startY = event.y
@@ -188,35 +198,93 @@ class TrackpadActivity : Activity() {
                 lastY = event.y
                 downTime = System.currentTimeMillis()
                 isTap = true
+                isLongPress = false
+                isTwoFinger = false
+                longPressHandler.postDelayed(longPressRunnable, longPressTimeout)
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (event.pointerCount == 2) {
+                    isTwoFinger = true
+                    isTap = false
+                    isLongPress = false
+                    longPressHandler.removeCallbacks(longPressRunnable)
+                    
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START)
+                    // Feedback
+                    window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                    
+                    // Reset lastX/lastY to the average of the two fingers for smoother drag start
+                    lastX = (event.getX(0) + event.getX(1)) / 2f
+                    lastY = (event.getY(0) + event.getY(1)) / 2f
+                }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                val dx = (event.x - lastX) * sensitivity
-                val dy = (event.y - lastY) * sensitivity
-                
-                // Real trackpads don't swallow movement, emit instantly for smooth tracking
-                if (dx != 0f || dy != 0f) {
-                    TrackpadEventBus.sendMoveEvent(dx, dy)
+                val currentX = if (isTwoFinger && event.pointerCount >= 2) {
+                    (event.getX(0) + event.getX(1)) / 2f
+                } else {
+                    event.x
+                }
+                val currentY = if (isTwoFinger && event.pointerCount >= 2) {
+                    (event.getY(0) + event.getY(1)) / 2f
+                } else {
+                    event.y
+                }
+
+                val dx = (currentX - lastX) * sensitivity
+                val dy = (currentY - lastY) * sensitivity
+
+                if (isTwoFinger || isLongPress) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy)
+                } else {
+                    if (dx != 0f || dy != 0f) {
+                        TrackpadEventBus.sendMoveEvent(dx, dy)
+                    }
+                    
+                    if (isTap && (abs(event.x - startX) > touchSlop || abs(event.y - startY) > touchSlop)) {
+                        isTap = false
+                        longPressHandler.removeCallbacks(longPressRunnable)
+                    }
                 }
                 
-                // If it moved too far from the point of origin, cancel the tap intent
-                if (isTap && (abs(event.x - startX) > touchSlop || abs(event.y - startY) > touchSlop)) {
-                    isTap = false
+                lastX = currentX
+                lastY = currentY
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (isTwoFinger && event.pointerCount < 2) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP)
+                    isTwoFinger = false
+                    // Update lastX/lastY to the remaining finger to prevent jump
+                    val remainingIndex = if (event.actionIndex == 0) 1 else 0
+                    lastX = event.getX(remainingIndex)
+                    lastY = event.getY(remainingIndex)
                 }
-                
-                lastX = event.x
-                lastY = event.y
-                
                 return true
             }
             MotionEvent.ACTION_UP -> {
+                longPressHandler.removeCallbacks(longPressRunnable)
                 val upTime = System.currentTimeMillis()
                 val tapTimeout = ViewConfiguration.getTapTimeout().toLong()
                 
-                // If it was quick and stayed within touch slop -> broadcast a tap
-                if (isTap && (upTime - downTime) <= tapTimeout) {
+                if (isLongPress || isTwoFinger) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP)
+                } else if (isTap && (upTime - downTime) <= tapTimeout) {
                     TrackpadEventBus.sendTapEvent()
                 }
+                
+                isTwoFinger = false
+                isLongPress = false
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                longPressHandler.removeCallbacks(longPressRunnable)
+                if (isLongPress || isTwoFinger) {
+                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP)
+                }
+                isTwoFinger = false
+                isLongPress = false
                 return true
             }
         }

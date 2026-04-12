@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * Event Bus using Kotlin Coroutines SharedFlow to communicate between the 
- * Trackpad Activity, Cursor Overlay Service, and Click Injector Service.
+ * Trackpad Activity and Click Injector Service.
  */
 object TrackpadEventBus {
     // Shared flow to send X and Y deltas from the Trackpad to the Overlay
@@ -37,6 +37,16 @@ object TrackpadEventBus {
     )
     val displayChangeEvents = _displayChangeEvents.asSharedFlow()
 
+    // Shared flow to send drag events
+    private val _dragEvents = MutableSharedFlow<DragEvent>(
+        extraBufferCapacity = 10,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val dragEvents = _dragEvents.asSharedFlow()
+
+    enum class DragAction { START, MOVE, STOP }
+    data class DragEvent(val action: DragAction, val dx: Float = 0f, val dy: Float = 0f)
+
     fun sendMoveEvent(dx: Float, dy: Float) {
         _moveEvents.tryEmit(Pair(dx, dy))
     }
@@ -51,5 +61,9 @@ object TrackpadEventBus {
 
     fun sendDisplayChangeEvent(displayId: Int) {
         _displayChangeEvents.tryEmit(displayId)
+    }
+
+    fun sendDragEvent(action: DragAction, dx: Float = 0f, dy: Float = 0f) {
+        _dragEvents.tryEmit(DragEvent(action, dx, dy))
     }
 }

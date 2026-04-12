@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <dimen name="cursor_size">12dp</dimen>
-    <string name="accessibility_description">Android Mouse Click Injector</string>
-    <string name="app_name">Android Mouse</string>
-</resources>

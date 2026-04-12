@@ -14,6 +14,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.ImageView
 import kotlinx.coroutines.*
+import kotlin.math.abs
 
 class ClickInjectorService : AccessibilityService() {
 
@@ -30,6 +31,8 @@ class ClickInjectorService : AccessibilityService() {
     private var externalDisplayId: Int = Display.DEFAULT_DISPLAY
     private var displayWidth = 1920
     private var displayHeight = 1080
+
+    private var currentDragStroke: GestureDescription.StrokeDescription? = null
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -108,17 +111,17 @@ class ClickInjectorService : AccessibilityService() {
                 currentX = currentX.coerceIn(0f, displayWidth.toFloat() - 1f)
                 currentY = currentY.coerceIn(0f, displayHeight.toFloat() - 1f)
 
-                layoutParams?.x = currentX.toInt()
-                layoutParams?.y = currentY.toInt()
-                
-                cursorView?.let { view ->
-                    windowManager?.updateViewLayout(view, layoutParams)
-                }
+                updateCursorPosition()
             }
         }
         serviceScope.launch {
             TrackpadEventBus.tapEvents.collect {
                 performClick(currentX, currentY, externalDisplayId)
+            }
+        }
+        serviceScope.launch {
+            TrackpadEventBus.dragEvents.collect { event ->
+                handleDragEvent(event)
             }
         }
         serviceScope.launch {
@@ -133,11 +136,65 @@ class ClickInjectorService : AccessibilityService() {
                 performClick(currentX, currentY, externalDisplayId)
                 delay(200)
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val displayWindows = windows.filter { it.displayId == externalDisplayId }
-                }
-
                 performGlobalAction(action)
+            }
+        }
+    }
+
+    private fun updateCursorPosition() {
+        layoutParams?.x = currentX.toInt()
+        layoutParams?.y = currentY.toInt()
+        
+        cursorView?.let { view ->
+            try {
+                windowManager?.updateViewLayout(view, layoutParams)
+            } catch (e: Exception) {
+                Log.e("ClickInjectorService", "Error updating cursor position", e)
+            }
+        }
+    }
+
+    private fun handleDragEvent(event: TrackpadEventBus.DragEvent) {
+        when (event.action) {
+            TrackpadEventBus.DragAction.START -> {
+                val path = Path().apply { moveTo(currentX, currentY) }
+                // Gesture with isContinued = true to allow for multiple movements
+                currentDragStroke = GestureDescription.StrokeDescription(path, 0, 100, true)
+                val builder = GestureDescription.Builder().addStroke(currentDragStroke!!)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    builder.setDisplayId(externalDisplayId)
+                }
+                dispatchGesture(builder.build(), null, null)
+            }
+            TrackpadEventBus.DragAction.MOVE -> {
+                currentX += event.dx
+                currentY += event.dy
+                currentX = currentX.coerceIn(0f, displayWidth.toFloat() - 1f)
+                currentY = currentY.coerceIn(0f, displayHeight.toFloat() - 1f)
+                updateCursorPosition()
+
+                currentDragStroke?.let { stroke ->
+                    val path = Path().apply { moveTo(currentX, currentY) }
+                    val nextStroke = stroke.continueStroke(path, 0, 100, true)
+                    currentDragStroke = nextStroke
+                    val builder = GestureDescription.Builder().addStroke(nextStroke)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        builder.setDisplayId(externalDisplayId)
+                    }
+                    dispatchGesture(builder.build(), null, null)
+                }
+            }
+            TrackpadEventBus.DragAction.STOP -> {
+                currentDragStroke?.let { stroke ->
+                    val path = Path().apply { moveTo(currentX, currentY) }
+                    val lastStroke = stroke.continueStroke(path, 0, 10, false)
+                    val builder = GestureDescription.Builder().addStroke(lastStroke)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        builder.setDisplayId(externalDisplayId)
+                    }
+                    dispatchGesture(builder.build(), null, null)
+                    currentDragStroke = null
+                }
             }
         }
     }
