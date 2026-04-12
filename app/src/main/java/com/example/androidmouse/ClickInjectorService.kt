@@ -20,7 +20,7 @@ import kotlin.math.abs
 
 class ClickInjectorService : AccessibilityService() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
+    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var windowManager: WindowManager? = null
     private var cursorView: ImageView? = null
@@ -29,6 +29,8 @@ class ClickInjectorService : AccessibilityService() {
     // Track the absolute position of the cursor
     private var currentX = 0f
     private var currentY = 0f
+    private var lastSentX = -1
+    private var lastSentY = -1
     private var cursorSize = 0
     private var externalDisplayId: Int = Display.DEFAULT_DISPLAY
     private var displayWidth = 1920
@@ -47,13 +49,15 @@ class ClickInjectorService : AccessibilityService() {
 
     private fun setupOverlay(displayId: Int? = null) {
         try {
-            cursorView?.let {
+            // Remove previous view using the manager it was added to
+            cursorView?.let { view ->
                 try {
-                    windowManager?.removeView(it)
+                    windowManager?.removeView(view)
                 } catch (e: Exception) {
                     Log.e("ClickInjectorService", "Error removing old cursor view", e)
                 }
             }
+            cursorView = null
 
             val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
             val displays = displayManager.displays
@@ -212,87 +216,125 @@ class ClickInjectorService : AccessibilityService() {
     }
 
     private fun updateCursorPosition() {
-        layoutParams?.x = currentX.toInt()
-        layoutParams?.y = currentY.toInt()
-        
-        cursorView?.let { view ->
-            try {
-                windowManager?.updateViewLayout(view, layoutParams)
-            } catch (e: Exception) {
-                Log.e("ClickInjectorService", "Error updating cursor position", e)
+        val nextX = currentX.toInt()
+        val nextY = currentY.toInt()
+
+        if (nextX == lastSentX && nextY == lastSentY) return
+
+        layoutParams?.let { lp ->
+            lp.x = nextX
+            lp.y = nextY
+            cursorView?.let { view ->
+                try {
+                    windowManager?.updateViewLayout(view, lp)
+                    lastSentX = nextX
+                    lastSentY = nextY
+                } catch (e: Exception) {
+                    Log.e("ClickInjectorService", "Error updating cursor position", e)
+                }
             }
         }
     }
 
     private fun handleDragEvent(event: TrackpadEventBus.DragEvent) {
-        when (event.action) {
-            TrackpadEventBus.DragAction.START -> {
-                gestureX = currentX
-                gestureY = currentY
-                val path = Path().apply { moveTo(gestureX, gestureY) }
-                // Gesture with isContinued = true to allow for multiple movements
-                // We use a small duration for the initial point
-                currentDragStroke = GestureDescription.StrokeDescription(path, 0, 10, true)
-                val builder = GestureDescription.Builder().addStroke(currentDragStroke!!)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    builder.setDisplayId(externalDisplayId)
-                }
-                dispatchGesture(builder.build(), null, null)
-            }
-            TrackpadEventBus.DragAction.MOVE -> {
-                val oldX = gestureX
-                val oldY = gestureY
-
-                if (event.isScroll) {
-                    // Scrolling: Move the gesture path, but keep cursor in place
-                    // Note: Inverting dy for natural scroll feel if needed, but let's keep it direct for now
-                    gestureX += event.dx
-                    gestureY += event.dy
-                } else {
-                    // Resizing/Dragging: Move both cursor and gesture path
-                    currentX += event.dx
-                    currentY += event.dy
-                    currentX = currentX.coerceIn(0f, displayWidth.toFloat() - 1f)
-                    currentY = currentY.coerceIn(0f, displayHeight.toFloat() - 1f)
-                    updateCursorPosition()
+        try {
+            when (event.action) {
+                TrackpadEventBus.DragAction.START -> {
                     gestureX = currentX
                     gestureY = currentY
-                }
-
-                currentDragStroke?.let { stroke ->
                     val path = Path().apply {
-                        moveTo(oldX, oldY)
+                        moveTo(gestureX, gestureY)
                         lineTo(gestureX, gestureY)
                     }
-                    // Use a short duration for MOVE segments to keep it responsive
-                    val nextStroke = stroke.continueStroke(path, 0, 20, true)
-                    currentDragStroke = nextStroke
-                    val builder = GestureDescription.Builder().addStroke(nextStroke)
+                    currentDragStroke = GestureDescription.StrokeDescription(path, 0, 10, true)
+                    val builder = GestureDescription.Builder().addStroke(currentDragStroke!!)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         builder.setDisplayId(externalDisplayId)
                     }
                     dispatchGesture(builder.build(), null, null)
                 }
-            }
-            TrackpadEventBus.DragAction.STOP -> {
-                currentDragStroke?.let { stroke ->
-                    val path = Path().apply { moveTo(gestureX, gestureY) }
-                    // Final segment with isContinued = false
-                    val lastStroke = stroke.continueStroke(path, 0, 10, false)
-                    val builder = GestureDescription.Builder().addStroke(lastStroke)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        builder.setDisplayId(externalDisplayId)
+                TrackpadEventBus.DragAction.MOVE -> {
+                    val oldX = gestureX
+                    val oldY = gestureY
+
+                    if (event.isScroll) {
+                        gestureX += event.dx
+                        gestureY += event.dy
+                    } else {
+                        currentX += event.dx
+                        currentY += event.dy
+                        currentX = currentX.coerceIn(0f, displayWidth.toFloat() - 1f)
+                        currentY = currentY.coerceIn(0f, displayHeight.toFloat() - 1f)
+                        updateCursorPosition()
+                        gestureX = currentX
+                        gestureY = currentY
                     }
-                    dispatchGesture(builder.build(), null, null)
-                    currentDragStroke = null
+
+                    // Coerce gesture coordinates to prevent out-of-bounds crashes
+                    gestureX = gestureX.coerceIn(0f, displayWidth.toFloat() - 1f)
+                    gestureY = gestureY.coerceIn(0f, displayHeight.toFloat() - 1f)
+
+                    currentDragStroke?.let { stroke ->
+                        val path = Path().apply {
+                            moveTo(oldX, oldY)
+                            lineTo(gestureX, gestureY)
+                        }
+
+                        var nextStroke = try {
+                            stroke.continueStroke(path, 0, 20, true)
+                        } catch (e: Exception) {
+                            Log.e("ClickInjectorService", "Error continuing stroke", e)
+                            null
+                        }
+
+                        if (nextStroke == null) {
+                            Log.d("ClickInjectorService", "Gesture segment failed, restarting gesture")
+                            currentDragStroke = null
+                            // Restarting inline can lead to recursion, so we just stop and wait for next move
+                            return
+                        }
+
+                        currentDragStroke = nextStroke
+                        val builder = GestureDescription.Builder().addStroke(nextStroke)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            builder.setDisplayId(externalDisplayId)
+                        }
+                        dispatchGesture(builder.build(), null, null)
+                    }
+                }
+                TrackpadEventBus.DragAction.STOP -> {
+                    currentDragStroke?.let { stroke ->
+                        val path = Path().apply {
+                            moveTo(gestureX, gestureY)
+                            lineTo(gestureX, gestureY)
+                        }
+                        val lastStroke = try {
+                            stroke.continueStroke(path, 0, 10, false)
+                        } catch (e: Exception) {
+                            Log.e("ClickInjectorService", "Error stopping stroke", e)
+                            null
+                        }
+
+                        if (lastStroke != null) {
+                            val builder = GestureDescription.Builder().addStroke(lastStroke)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                builder.setDisplayId(externalDisplayId)
+                            }
+                            dispatchGesture(builder.build(), null, null)
+                        }
+                        currentDragStroke = null
+                    }
                 }
             }
+        } catch (e: Exception) {
+            Log.e("ClickInjectorService", "Fatal error in handleDragEvent", e)
         }
     }
 
     private fun performClick(x: Float, y: Float, displayId: Int) {
         val path = Path().apply {
             moveTo(x, y)
+            lineTo(x, y) // Ensure path is not empty
         }
         
         // Tap gesture: 0 delay, duration of 50ms is standard for a quick tap

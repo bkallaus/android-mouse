@@ -11,21 +11,21 @@ import kotlinx.coroutines.flow.asSharedFlow
 object TrackpadEventBus {
     // Shared flow to send X and Y deltas from the Trackpad to the Overlay
     private val _moveEvents = MutableSharedFlow<Pair<Float, Float>>(
-        extraBufferCapacity = 64,
+        extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val moveEvents = _moveEvents.asSharedFlow()
 
     // Shared flow to send tap commands from the Trackpad to the Click Injector
     private val _tapEvents = MutableSharedFlow<Unit>(
-        extraBufferCapacity = 10,
+        extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val tapEvents = _tapEvents.asSharedFlow()
 
     // Shared flow to send global actions (Back, Home, Recents)
     private val _globalActions = MutableSharedFlow<Int>(
-        extraBufferCapacity = 10,
+        extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val globalActions = _globalActions.asSharedFlow()
@@ -39,21 +39,21 @@ object TrackpadEventBus {
 
     // Shared flow to send drag events
     private val _dragEvents = MutableSharedFlow<DragEvent>(
-        extraBufferCapacity = 10,
+        extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val dragEvents = _dragEvents.asSharedFlow()
 
     // Shared flow to send text to be injected
     private val _textEvents = MutableSharedFlow<String>(
-        extraBufferCapacity = 10,
+        extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val textEvents = _textEvents.asSharedFlow()
 
     // Shared flow to send special key events (e.g. Enter, Backspace)
     private val _keyEvents = MutableSharedFlow<Int>(
-        extraBufferCapacity = 10,
+        extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val keyEvents = _keyEvents.asSharedFlow()

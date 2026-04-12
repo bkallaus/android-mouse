@@ -28,6 +28,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.ImageButton
+import android.view.accessibility.AccessibilityManager
+import android.accessibilityservice.AccessibilityServiceInfo
 import androidx.core.content.edit
 import kotlin.math.abs
 
@@ -91,7 +93,8 @@ class TrackpadActivity : Activity() {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
 
-        val currentDisplayIndex = displays.indexOfFirst { it.displayId == getSharedPreferences("trackpad_prefs", Context.MODE_PRIVATE).getInt("last_display_id", -1) }
+        val sharedPrefs = getSharedPreferences(TrackpadConstants.PREFS_NAME, Context.MODE_PRIVATE)
+        val currentDisplayIndex = displays.indexOfFirst { it.displayId == sharedPrefs.getInt(TrackpadConstants.KEY_LAST_DISPLAY_ID, -1) }
         if (currentDisplayIndex != -1) {
             spinner.setSelection(currentDisplayIndex)
         } else {
@@ -100,8 +103,7 @@ class TrackpadActivity : Activity() {
         }
 
         // Setup Sensitivity
-        val sharedPrefs = getSharedPreferences("trackpad_prefs", Context.MODE_PRIVATE)
-        sensitivity = sharedPrefs.getFloat("sensitivity", 1.0f)
+        sensitivity = sharedPrefs.getFloat(TrackpadConstants.KEY_SENSITIVITY, TrackpadConstants.DEFAULT_SENSITIVITY)
         seekBar.progress = (sensitivity * 50f - 10f).toInt().coerceIn(0, 100)
 
         val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar)
@@ -122,7 +124,7 @@ class TrackpadActivity : Activity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val selectedDisplay = displays[position]
                 TrackpadEventBus.sendDisplayChangeEvent(selectedDisplay.displayId)
-                sharedPrefs.edit { putInt("last_display_id", selectedDisplay.displayId) }
+                sharedPrefs.edit { putInt(TrackpadConstants.KEY_LAST_DISPLAY_ID, selectedDisplay.displayId) }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
@@ -130,7 +132,7 @@ class TrackpadActivity : Activity() {
         seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 sensitivity = (progress + 10) / 50.0f
-                sharedPrefs.edit { putFloat("sensitivity", sensitivity) }
+                sharedPrefs.edit { putFloat(TrackpadConstants.KEY_SENSITIVITY, sensitivity) }
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
@@ -214,28 +216,12 @@ class TrackpadActivity : Activity() {
     }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
-        val service = "$packageName/${ClickInjectorService::class.java.canonicalName}"
-        val enabled = Settings.Secure.getInt(
-            contentResolver,
-            Settings.Secure.ACCESSIBILITY_ENABLED, 0
-        )
-        if (enabled == 1) {
-            val settingValue = Settings.Secure.getString(
-                contentResolver,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-            )
-            if (settingValue != null) {
-                val splitter = TextUtils.SimpleStringSplitter(':')
-                splitter.setString(settingValue)
-                while (splitter.hasNext()) {
-                    val accessibilityService = splitter.next()
-                    if (accessibilityService.equals(service, ignoreCase = true)) {
-                        return true
-                    }
-                }
-            }
+        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+        return enabledServices.any {
+            it.resolveInfo.serviceInfo.packageName == packageName &&
+            it.resolveInfo.serviceInfo.name == ClickInjectorService::class.java.canonicalName
         }
-        return false
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -285,9 +271,13 @@ class TrackpadActivity : Activity() {
                 val dy = (currentY - lastY) * sensitivity
 
                 if (isTwoFinger) {
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy, isScroll = true)
+                    if (dx != 0f || dy != 0f) {
+                        TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy, isScroll = true)
+                    }
                 } else if (isLongPress) {
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy, isScroll = false)
+                    if (dx != 0f || dy != 0f) {
+                        TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy, isScroll = false)
+                    }
                 } else {
                     if (dx != 0f || dy != 0f) {
                         TrackpadEventBus.sendMoveEvent(dx, dy)
@@ -307,13 +297,17 @@ class TrackpadActivity : Activity() {
                 if (isTwoFinger) {
                     TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
                     isTwoFinger = false
+                    
                     // Update lastX/lastY to the remaining finger to prevent jump
-                    val remainingIndex = if (event.actionIndex == 0) 1 else 0
-                    try {
-                        lastX = event.getX(remainingIndex)
-                        lastY = event.getY(remainingIndex)
-                    } catch (e: Exception) {
-                        // In case the index is invalid for some reason
+                    val upIndex = event.actionIndex
+                    val remainingIndex = if (upIndex == 0) 1 else 0
+                    if (remainingIndex < event.pointerCount) {
+                        try {
+                            lastX = event.getX(remainingIndex)
+                            lastY = event.getY(remainingIndex)
+                        } catch (e: IllegalArgumentException) {
+                            Log.e("TrackpadActivity", "Error getting pointer coordinates", e)
+                        }
                     }
                 }
                 return true
