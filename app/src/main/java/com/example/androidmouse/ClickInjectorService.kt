@@ -1,22 +1,24 @@
 package com.example.androidmouse
 
-import android.util.Log
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
-import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.Display
 import android.view.Gravity
+import android.view.KeyEvent
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ImageView
-import android.os.Bundle
 import kotlinx.coroutines.*
-import kotlin.math.abs
 
 class ClickInjectorService : AccessibilityService() {
 
@@ -40,10 +42,51 @@ class ClickInjectorService : AccessibilityService() {
     private var gestureX = 0f
     private var gestureY = 0f
 
+    private var displayManager: DisplayManager? = null
+
+    // Keeps the cursor valid when monitors are plugged/unplugged, rotated or change resolution
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {
+            // Auto-attach to a newly connected monitor if we are currently on the phone screen
+            if (externalDisplayId == Display.DEFAULT_DISPLAY && displayId != Display.DEFAULT_DISPLAY) {
+                setupOverlay(displayId)
+            }
+        }
+
+        override fun onDisplayRemoved(displayId: Int) {
+            if (displayId == externalDisplayId) {
+                currentDragStroke = null
+                setupOverlay()
+            }
+        }
+
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId != externalDisplayId) return
+            val display = displayManager?.getDisplay(displayId) ?: return
+            val size = android.graphics.Point()
+            @Suppress("DEPRECATION")
+            display.getRealSize(size)
+            if (size.x != displayWidth || size.y != displayHeight) {
+                displayWidth = size.x
+                displayHeight = size.y
+                currentX = currentX.coerceIn(0f, displayWidth - 1f)
+                currentY = currentY.coerceIn(0f, displayHeight - 1f)
+                updateCursorPosition(force = true)
+            }
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Log.d("ClickInjectorService", "Accessibility Service Connected")
-        setupOverlay()
+        Log.d(TAG, "Accessibility Service Connected")
+        val dm = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        displayManager = dm
+        dm.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
+
+        // Restore the display the user picked last time, if it is still connected
+        val savedDisplayId = getSharedPreferences(TrackpadConstants.PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(TrackpadConstants.KEY_LAST_DISPLAY_ID, -1)
+        setupOverlay(if (dm.getDisplay(savedDisplayId) != null) savedDisplayId else null)
         observeEvents()
     }
 
@@ -54,25 +97,25 @@ class ClickInjectorService : AccessibilityService() {
                 try {
                     windowManager?.removeView(view)
                 } catch (e: Exception) {
-                    Log.e("ClickInjectorService", "Error removing old cursor view", e)
+                    Log.e(TAG, "Error removing old cursor view", e)
                 }
             }
             cursorView = null
 
-            val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-            val displays = displayManager.displays
-            
+            val displays = (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).displays
+
             val targetDisplay = if (displayId != null) {
                 displays.firstOrNull { it.displayId == displayId }
             } else {
-                displays.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY } 
-                                 ?: displays.firstOrNull { it.displayId == Display.DEFAULT_DISPLAY }
+                displays.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY }
+                    ?: displays.firstOrNull { it.displayId == Display.DEFAULT_DISPLAY }
             }
-            
+
             if (targetDisplay == null) return
-            
+
             externalDisplayId = targetDisplay.displayId
             val size = android.graphics.Point()
+            @Suppress("DEPRECATION")
             targetDisplay.getRealSize(size)
             displayWidth = size.x
             displayHeight = size.y
@@ -89,14 +132,16 @@ class ClickInjectorService : AccessibilityService() {
                 alpha = 1.0f
             }
 
+            // TYPE_ACCESSIBILITY_OVERLAY is granted by the accessibility service itself,
+            // so no "Display over other apps" permission is needed.
             layoutParams = WindowManager.LayoutParams(
                 cursorSize,
                 cursorSize,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
@@ -105,26 +150,29 @@ class ClickInjectorService : AccessibilityService() {
             }
 
             windowManager?.addView(cursorView, layoutParams)
+            lastSentX = currentX.toInt()
+            lastSentY = currentY.toInt()
         } catch (e: Exception) {
-            Log.e("ClickInjectorService", "Error in setupOverlay", e)
+            Log.e(TAG, "Error in setupOverlay", e)
         }
     }
 
     private fun observeEvents() {
         serviceScope.launch {
             TrackpadEventBus.moveEvents.collect { (dx, dy) ->
-                currentX += dx
-                currentY += dy
-
-                currentX = currentX.coerceIn(0f, displayWidth.toFloat() - 1f)
-                currentY = currentY.coerceIn(0f, displayHeight.toFloat() - 1f)
-
+                currentX = (currentX + dx).coerceIn(0f, displayWidth.toFloat() - 1f)
+                currentY = (currentY + dy).coerceIn(0f, displayHeight.toFloat() - 1f)
                 updateCursorPosition()
             }
         }
         serviceScope.launch {
             TrackpadEventBus.tapEvents.collect {
                 performClick(currentX, currentY, externalDisplayId)
+            }
+        }
+        serviceScope.launch {
+            TrackpadEventBus.rightClickEvents.collect {
+                performLongPress(currentX, currentY, externalDisplayId)
             }
         }
         serviceScope.launch {
@@ -141,10 +189,13 @@ class ClickInjectorService : AccessibilityService() {
         }
         serviceScope.launch {
             TrackpadEventBus.globalActions.collect { action ->
-                // Ensure the target display/window has focus before performing the global action
-                performClick(currentX, currentY, externalDisplayId)
-                delay(200)
-
+                // Global actions apply to the focused display. Only "click to focus" when the
+                // external display is not already focused, so Back/Home don't also press
+                // whatever happens to be under the cursor.
+                if (!isDisplayFocused(externalDisplayId)) {
+                    performClick(currentX, currentY, externalDisplayId)
+                    delay(200)
+                }
                 performGlobalAction(action)
             }
         }
@@ -160,66 +211,86 @@ class ClickInjectorService : AccessibilityService() {
         }
     }
 
-    private fun handleKeyEvent(keyCode: Int) {
-        val focusedNode = getFocusedNode()
-        if (focusedNode != null) {
-            when (keyCode) {
-                android.view.KeyEvent.KEYCODE_ENTER -> {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        focusedNode.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
-                    } else {
-                        // Fallback or skip for older versions
-                    }
-                }
-            }
-            @Suppress("DEPRECATION")
-            focusedNode.recycle()
-        }
+    private fun isDisplayFocused(displayId: Int): Boolean {
+        val windows = getWindowsOnAllDisplays()[displayId] ?: return false
+        return windows.any { it.isFocused }
     }
 
     private fun getFocusedNode(): AccessibilityNodeInfo? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val windowsByDisplay = getWindowsOnAllDisplays()
-            val windows = windowsByDisplay[externalDisplayId]
-            var found: AccessibilityNodeInfo? = null
-            windows?.forEach { window ->
-                if (found == null) {
-                    val root = window.root
-                    found = root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-                    @Suppress("DEPRECATION")
-                    root?.recycle()
-                }
-            }
-            found
-        } else {
-            val root = rootInActiveWindow
-            val found = root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+        val windows = getWindowsOnAllDisplays()[externalDisplayId] ?: return null
+        for (window in windows) {
+            val root = window.root ?: continue
+            val found = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             @Suppress("DEPRECATION")
-            root?.recycle()
-            found
+            root.recycle()
+            if (found != null) return found
         }
+        return null
+    }
+
+    private fun handleKeyEvent(keyCode: Int) {
+        val focusedNode = getFocusedNode() ?: return
+        when (keyCode) {
+            KeyEvent.KEYCODE_ENTER ->
+                focusedNode.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+            KeyEvent.KEYCODE_DEL -> deleteBeforeCursor(focusedNode)
+        }
+        @Suppress("DEPRECATION")
+        focusedNode.recycle()
     }
 
     private fun injectText(text: String) {
         val focusedNode = getFocusedNode()
+        if (focusedNode == null) {
+            Log.d(TAG, "No focused node found to inject text")
+            return
+        }
+        // ACTION_SET_TEXT replaces the whole field, so splice the new text in at the caret
+        // (replacing any selection) instead of wiping what is already there.
+        val current = editableText(focusedNode)
+        val (start, end) = selectionOf(focusedNode, current.length)
+        val updated = current.substring(0, start) + text + current.substring(end)
+        setTextAndCaret(focusedNode, updated, start + text.length)
+        @Suppress("DEPRECATION")
+        focusedNode.recycle()
+    }
 
-        if (focusedNode != null) {
-            val arguments = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            }
-            focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-            @Suppress("DEPRECATION")
-            focusedNode.recycle()
-        } else {
-            Log.d("ClickInjectorService", "No focused node found to inject text")
+    private fun deleteBeforeCursor(node: AccessibilityNodeInfo) {
+        val current = editableText(node)
+        val (start, end) = selectionOf(node, current.length)
+        when {
+            start != end -> setTextAndCaret(node, current.removeRange(start, end), start)
+            start > 0 -> setTextAndCaret(node, current.removeRange(start - 1, start), start - 1)
         }
     }
 
-    private fun updateCursorPosition() {
+    /** Current editable text of [node], ignoring placeholder hint text. */
+    private fun editableText(node: AccessibilityNodeInfo): String =
+        if (node.isShowingHintText) "" else node.text?.toString() ?: ""
+
+    /** Selection of [node] clamped to its text; the caret defaults to the end of the field. */
+    private fun selectionOf(node: AccessibilityNodeInfo, length: Int): Pair<Int, Int> {
+        val s = node.textSelectionStart
+        val e = node.textSelectionEnd
+        if (s < 0 || e < 0) return length to length
+        return minOf(s, e).coerceIn(0, length) to maxOf(s, e).coerceIn(0, length)
+    }
+
+    private fun setTextAndCaret(node: AccessibilityNodeInfo, text: String, caret: Int) {
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+        })
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, caret)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, caret)
+        })
+    }
+
+    private fun updateCursorPosition(force: Boolean = false) {
         val nextX = currentX.toInt()
         val nextY = currentY.toInt()
 
-        if (nextX == lastSentX && nextY == lastSentY) return
+        if (!force && nextX == lastSentX && nextY == lastSentY) return
 
         layoutParams?.let { lp ->
             lp.x = nextX
@@ -230,10 +301,18 @@ class ClickInjectorService : AccessibilityService() {
                     lastSentX = nextX
                     lastSentY = nextY
                 } catch (e: Exception) {
-                    Log.e("ClickInjectorService", "Error updating cursor position", e)
+                    Log.e(TAG, "Error updating cursor position", e)
                 }
             }
         }
+    }
+
+    private fun dispatchOnDisplay(stroke: GestureDescription.StrokeDescription) {
+        val gesture = GestureDescription.Builder()
+            .addStroke(stroke)
+            .setDisplayId(externalDisplayId)
+            .build()
+        dispatchGesture(gesture, null, null)
     }
 
     private fun handleDragEvent(event: TrackpadEventBus.DragEvent) {
@@ -246,12 +325,9 @@ class ClickInjectorService : AccessibilityService() {
                         moveTo(gestureX, gestureY)
                         lineTo(gestureX, gestureY)
                     }
-                    currentDragStroke = GestureDescription.StrokeDescription(path, 0, 10, true)
-                    val builder = GestureDescription.Builder().addStroke(currentDragStroke!!)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        builder.setDisplayId(externalDisplayId)
-                    }
-                    dispatchGesture(builder.build(), null, null)
+                    val stroke = GestureDescription.StrokeDescription(path, 0, 10, true)
+                    currentDragStroke = stroke
+                    dispatchOnDisplay(stroke)
                 }
                 TrackpadEventBus.DragAction.MOVE -> {
                     val oldX = gestureX
@@ -261,10 +337,8 @@ class ClickInjectorService : AccessibilityService() {
                         gestureX += event.dx
                         gestureY += event.dy
                     } else {
-                        currentX += event.dx
-                        currentY += event.dy
-                        currentX = currentX.coerceIn(0f, displayWidth.toFloat() - 1f)
-                        currentY = currentY.coerceIn(0f, displayHeight.toFloat() - 1f)
+                        currentX = (currentX + event.dx).coerceIn(0f, displayWidth.toFloat() - 1f)
+                        currentY = (currentY + event.dy).coerceIn(0f, displayHeight.toFloat() - 1f)
                         updateCursorPosition()
                         gestureX = currentX
                         gestureY = currentY
@@ -274,93 +348,65 @@ class ClickInjectorService : AccessibilityService() {
                     gestureX = gestureX.coerceIn(0f, displayWidth.toFloat() - 1f)
                     gestureY = gestureY.coerceIn(0f, displayHeight.toFloat() - 1f)
 
-                    currentDragStroke?.let { stroke ->
-                        val path = Path().apply {
-                            moveTo(oldX, oldY)
-                            lineTo(gestureX, gestureY)
-                        }
-
-                        var nextStroke = try {
-                            stroke.continueStroke(path, 0, 20, true)
-                        } catch (e: Exception) {
-                            Log.e("ClickInjectorService", "Error continuing stroke", e)
-                            null
-                        }
-
-                        if (nextStroke == null) {
-                            Log.d("ClickInjectorService", "Gesture segment failed, restarting gesture")
-                            currentDragStroke = null
-                            // Restarting inline can lead to recursion, so we just stop and wait for next move
-                            return
-                        }
-
-                        currentDragStroke = nextStroke
-                        val builder = GestureDescription.Builder().addStroke(nextStroke)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            builder.setDisplayId(externalDisplayId)
-                        }
-                        dispatchGesture(builder.build(), null, null)
+                    val stroke = currentDragStroke ?: return
+                    val path = Path().apply {
+                        moveTo(oldX, oldY)
+                        lineTo(gestureX, gestureY)
                     }
+                    val nextStroke = try {
+                        stroke.continueStroke(path, 0, 20, true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error continuing stroke", e)
+                        null
+                    }
+                    if (nextStroke == null) {
+                        // Restarting inline can lead to recursion, so just stop and wait for next drag
+                        currentDragStroke = null
+                        return
+                    }
+                    currentDragStroke = nextStroke
+                    dispatchOnDisplay(nextStroke)
                 }
                 TrackpadEventBus.DragAction.STOP -> {
-                    currentDragStroke?.let { stroke ->
-                        val path = Path().apply {
-                            moveTo(gestureX, gestureY)
-                            lineTo(gestureX, gestureY)
-                        }
-                        val lastStroke = try {
-                            stroke.continueStroke(path, 0, 10, false)
-                        } catch (e: Exception) {
-                            Log.e("ClickInjectorService", "Error stopping stroke", e)
-                            null
-                        }
-
-                        if (lastStroke != null) {
-                            val builder = GestureDescription.Builder().addStroke(lastStroke)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                builder.setDisplayId(externalDisplayId)
-                            }
-                            dispatchGesture(builder.build(), null, null)
-                        }
-                        currentDragStroke = null
+                    val stroke = currentDragStroke ?: return
+                    val path = Path().apply {
+                        moveTo(gestureX, gestureY)
+                        lineTo(gestureX, gestureY)
                     }
+                    val lastStroke = try {
+                        stroke.continueStroke(path, 0, 10, false)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error stopping stroke", e)
+                        null
+                    }
+                    lastStroke?.let { dispatchOnDisplay(it) }
+                    currentDragStroke = null
                 }
             }
         } catch (e: Exception) {
-            Log.e("ClickInjectorService", "Fatal error in handleDragEvent", e)
+            Log.e(TAG, "Fatal error in handleDragEvent", e)
         }
     }
 
     private fun performClick(x: Float, y: Float, displayId: Int) {
+        dispatchTap(x, y, displayId, durationMs = 50L)
+    }
+
+    /** Right click: Android maps a long press to the context menu / secondary action. */
+    private fun performLongPress(x: Float, y: Float, displayId: Int) {
+        dispatchTap(x, y, displayId, durationMs = ViewConfiguration.getLongPressTimeout() + 150L)
+    }
+
+    private fun dispatchTap(x: Float, y: Float, displayId: Int, durationMs: Long) {
         val path = Path().apply {
             moveTo(x, y)
             lineTo(x, y) // Ensure path is not empty
         }
-        
-        // Tap gesture: 0 delay, duration of 50ms is standard for a quick tap
-        val strokeDescription = GestureDescription.StrokeDescription(path, 0, 50)
-        
-        val gestureBuilder = GestureDescription.Builder()
-            .addStroke(strokeDescription)
-            
-        // Require API 30+ to inject gestures onto a specific display
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            gestureBuilder.setDisplayId(displayId)
-        }
-        
-        val gesture = gestureBuilder.build()
-        
-        dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                super.onCompleted(gestureDescription)
-                // Gesture successfully executed
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                super.onCancelled(gestureDescription)
-                // Gesture cancelled
-            }
-        }, null)
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
+            .setDisplayId(displayId) // API 30+ (minSdk) can target a specific display
+            .build()
+        dispatchGesture(gesture, null, null)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -370,16 +416,21 @@ class ClickInjectorService : AccessibilityService() {
     override fun onInterrupt() {
         // Not used
     }
-    
+
     override fun onDestroy() {
+        displayManager?.unregisterDisplayListener(displayListener)
         serviceScope.cancel()
         cursorView?.let {
             try {
                 windowManager?.removeView(it)
             } catch (e: Exception) {
-                Log.e("ClickInjectorService", "Error removing cursor on destroy", e)
+                Log.e(TAG, "Error removing cursor on destroy", e)
             }
         }
         super.onDestroy()
+    }
+
+    private companion object {
+        const val TAG = "ClickInjectorService"
     }
 }

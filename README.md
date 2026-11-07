@@ -21,17 +21,30 @@ No root required. Native Android APIs. Pure Kotlin.
 The magic happens across three decoupled, high-performance components:
 
 1. **Trackpad Activity:** A blank, immersive-mode full-screen surface that calculates precise X/Y finger deltas and detects quick tap gestures.
-2. **Cursor Overlay:** A specialized `SYSTEM_ALERT_WINDOW` scoped to the secondary display that smoothly renders and tracks a floating cursor in real-time.
+2. **Cursor Overlay:** A `TYPE_ACCESSIBILITY_OVERLAY` window scoped to the secondary display that smoothly renders and tracks a floating cursor in real-time.
 3. **Click Injector:** An `AccessibilityService` that observes tap commands from the Event Bus and dispatches click gestures directly to the external monitor framework.
 
 
+## 👆 Gestures & Controls
+
+| Input | Action |
+|---|---|
+| One-finger move | Move cursor (with optional speed-based acceleration) |
+| Tap | Left click |
+| Two-finger tap | Right click (long-press / context menu) |
+| Two-finger drag | Scroll (direction can be reversed in Settings) |
+| Press and hold, then drag | Click-and-drag (select text, move items) |
+| Back / Home / Recents buttons | System navigation on the external display |
+| Keyboard button | Type text; text is inserted at the caret. Send on an empty field = Enter, backspace on an empty field deletes on the target |
+
+Settings (gear icon): target display, sensitivity, pointer acceleration, reverse scroll. Settings persist across launches, and the cursor automatically follows monitors being plugged in, unplugged, or changing resolution.
+
 ## 🔒 Device Permissions
 
-Because this application simulates mouse input and overlays UI on an external screen, Android restricts it. **You must manually grant these permissions before the application will work:**
+Only one permission is needed. The cursor is drawn as an accessibility overlay, so **"Display over other apps" is not required**.
 
-1. **Draw Over Other Apps:** Open Settings > Apps > Special app access > **Display over other apps**. Find "Android Mouse" and toggle it **ON**.
-2. **Accessibility Access:** Open Settings > Accessibility > Downloaded apps (or Installed services). Find "Android Mouse" and toggle it to **ON**.
-3. **Ready to go!** Ensure your device is connected to an external monitor (Desktop Mode) and launch the main Trackpad Activity to start controlling your screen.
+1. **Accessibility Access:** Open Settings > Accessibility > Downloaded apps (or Installed services). Find "Android Mouse" and toggle it **ON** (the app has a shortcut button for this).
+2. **Ready to go!** Connect your device to an external monitor (Desktop Mode) and launch the app.
 
 ---
 *Built for the future of mobile productivity.*

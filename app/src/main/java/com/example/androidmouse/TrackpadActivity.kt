@@ -1,37 +1,40 @@
 package com.example.androidmouse
 
-import android.util.Log
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Activity
+import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
-import android.net.Uri
-import android.os.Build
+import android.hardware.display.DisplayManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
-import android.text.TextUtils
+import android.util.Log
+import android.view.Display
+import android.view.HapticFeedbackConstants
+import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.CompoundButton
+import android.widget.EditText
+import android.widget.ImageButton
 import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
-import android.content.Context
-import android.hardware.display.DisplayManager
-import android.view.Display
-import android.app.AlertDialog
-import android.view.LayoutInflater
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
-import android.widget.ImageButton
-import android.view.accessibility.AccessibilityManager
-import android.accessibilityservice.AccessibilityServiceInfo
 import androidx.core.content.edit
 import kotlin.math.abs
+import kotlin.math.hypot
 
 class TrackpadActivity : Activity() {
 
@@ -39,39 +42,49 @@ class TrackpadActivity : Activity() {
     private var startY = 0f
     private var lastX = 0f
     private var lastY = 0f
-    private var downTime = 0L
+    private var lastMoveTime = 0L
     private var isTap = false
     private var isLongPress = false
+
+    // Two-finger state: a short, still two-finger touch is a right click; movement scrolls
     private var isTwoFinger = false
+    private var isScrolling = false
+    private var twoFingerDownTime = 0L
+    private var twoFingerStartX = 0f
+    private var twoFingerStartY = 0f
+
     private val longPressTimeout = ViewConfiguration.getLongPressTimeout().toLong()
-    private val longPressHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val longPressHandler = Handler(Looper.getMainLooper())
     private val longPressRunnable = Runnable {
         isLongPress = true
+        isTap = false
         TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START, isScroll = false)
-        // Feedback
-        window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        haptic(HapticFeedbackConstants.LONG_PRESS)
     }
 
     private var touchSlop = 0
-    private var sensitivity = 1.0f
+    private var sensitivity = TrackpadConstants.DEFAULT_SENSITIVITY
+    private var accelerationEnabled = true
+    private var reverseScroll = false
+
+    private val prefs by lazy { getSharedPreferences(TrackpadConstants.PREFS_NAME, Context.MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_trackpad)
-        
+
         // Ensure the screen stays awake while using the trackpad
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        
+
         touchSlop = ViewConfiguration.get(this).scaledTouchSlop
-        
+
         findViewById<Button>(R.id.btn_accessibility).setOnClickListener {
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            startActivity(intent)
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
-        findViewById<View>(R.id.btn_recents).setOnClickListener {
-            TrackpadEventBus.sendGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
-        }
+        bindGlobalAction(R.id.btn_back, AccessibilityService.GLOBAL_ACTION_BACK)
+        bindGlobalAction(R.id.btn_home, AccessibilityService.GLOBAL_ACTION_HOME)
+        bindGlobalAction(R.id.btn_recents, AccessibilityService.GLOBAL_ACTION_RECENTS)
 
         findViewById<ImageButton>(R.id.btn_settings).setOnClickListener {
             showSettingsDialog()
@@ -80,10 +93,29 @@ class TrackpadActivity : Activity() {
         setupKeyboard()
     }
 
+    private fun bindGlobalAction(viewId: Int, action: Int) {
+        findViewById<View>(viewId).setOnClickListener {
+            haptic(HapticFeedbackConstants.VIRTUAL_KEY)
+            TrackpadEventBus.sendGlobalAction(action)
+        }
+    }
+
+    private fun loadPrefs() {
+        sensitivity = prefs.getFloat(TrackpadConstants.KEY_SENSITIVITY, TrackpadConstants.DEFAULT_SENSITIVITY)
+        accelerationEnabled = prefs.getBoolean(TrackpadConstants.KEY_ACCELERATION, true)
+        reverseScroll = prefs.getBoolean(TrackpadConstants.KEY_REVERSE_SCROLL, false)
+    }
+
+    private fun haptic(type: Int) {
+        window.decorView.performHapticFeedback(type)
+    }
+
     private fun showSettingsDialog() {
         val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_settings, null)
         val spinner = dialogView.findViewById<Spinner>(R.id.dialog_display_spinner)
         val seekBar = dialogView.findViewById<SeekBar>(R.id.dialog_sensitivity_seekbar)
+        val accelSwitch = dialogView.findViewById<CompoundButton>(R.id.dialog_acceleration_switch)
+        val reverseSwitch = dialogView.findViewById<CompoundButton>(R.id.dialog_reverse_scroll_switch)
 
         // Setup Spinner
         val displayManager = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -93,8 +125,9 @@ class TrackpadActivity : Activity() {
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         spinner.adapter = adapter
 
-        val sharedPrefs = getSharedPreferences(TrackpadConstants.PREFS_NAME, Context.MODE_PRIVATE)
-        val currentDisplayIndex = displays.indexOfFirst { it.displayId == sharedPrefs.getInt(TrackpadConstants.KEY_LAST_DISPLAY_ID, -1) }
+        val currentDisplayIndex = displays.indexOfFirst {
+            it.displayId == prefs.getInt(TrackpadConstants.KEY_LAST_DISPLAY_ID, -1)
+        }
         if (currentDisplayIndex != -1) {
             spinner.setSelection(currentDisplayIndex)
         } else {
@@ -102,9 +135,9 @@ class TrackpadActivity : Activity() {
             if (externalIndex != -1) spinner.setSelection(externalIndex)
         }
 
-        // Setup Sensitivity
-        sensitivity = sharedPrefs.getFloat(TrackpadConstants.KEY_SENSITIVITY, TrackpadConstants.DEFAULT_SENSITIVITY)
         seekBar.progress = (sensitivity * 50f - 10f).toInt().coerceIn(0, 100)
+        accelSwitch.isChecked = accelerationEnabled
+        reverseSwitch.isChecked = reverseScroll
 
         val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar)
             .setView(dialogView)
@@ -127,7 +160,7 @@ class TrackpadActivity : Activity() {
                 if (!userInitiatedSpinner) return
                 val selectedDisplay = displays[position]
                 TrackpadEventBus.sendDisplayChangeEvent(selectedDisplay.displayId)
-                sharedPrefs.edit { putInt(TrackpadConstants.KEY_LAST_DISPLAY_ID, selectedDisplay.displayId) }
+                prefs.edit { putInt(TrackpadConstants.KEY_LAST_DISPLAY_ID, selectedDisplay.displayId) }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
@@ -138,9 +171,18 @@ class TrackpadActivity : Activity() {
             }
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
             override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                sharedPrefs.edit { putFloat(TrackpadConstants.KEY_SENSITIVITY, sensitivity) }
+                prefs.edit { putFloat(TrackpadConstants.KEY_SENSITIVITY, sensitivity) }
             }
         })
+
+        accelSwitch.setOnCheckedChangeListener { _, checked ->
+            accelerationEnabled = checked
+            prefs.edit { putBoolean(TrackpadConstants.KEY_ACCELERATION, checked) }
+        }
+        reverseSwitch.setOnCheckedChangeListener { _, checked ->
+            reverseScroll = checked
+            prefs.edit { putBoolean(TrackpadConstants.KEY_REVERSE_SCROLL, checked) }
+        }
 
         dialog.show()
 
@@ -165,57 +207,49 @@ class TrackpadActivity : Activity() {
                 if (text.isNotEmpty()) {
                     TrackpadEventBus.sendTextEvent(text)
                     v.text = ""
+                } else {
+                    // Empty field + Send = press Enter on the target (submit forms, search, etc.)
+                    TrackpadEventBus.sendKeyEvent(KeyEvent.KEYCODE_ENTER)
                 }
-                // Optional: hide keyboard after sending? 
-                // imm.hideSoftInputFromWindow(v.windowToken, 0)
                 true
             } else {
                 false
             }
         }
-        
-        // Listen for backspace if the field is empty? 
-        // That's tricky with ACTION_SET_TEXT on the other side.
-        // For now, let's focus on sending blocks of text.
+
+        // Backspace on the (empty) local buffer deletes on the external display instead
+        hiddenEditText.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN &&
+                keyCode == KeyEvent.KEYCODE_DEL &&
+                hiddenEditText.text.isEmpty()
+            ) {
+                TrackpadEventBus.sendKeyEvent(KeyEvent.KEYCODE_DEL)
+                true
+            } else {
+                false
+            }
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        checkPermissionsAndStartService()
+        loadPrefs()
+        updatePermissionStatus()
     }
-    
-    private fun checkPermissionsAndStartService() {
-        Log.d("TrackpadActivity", "checkPermissionsAndStartService")
-        val overlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(this)
-        } else {
-            true
-        }
 
-        val accessibilityPermission = isAccessibilityServiceEnabled()
-        Log.d("TrackpadActivity", "overlayPermission=$overlayPermission, accessibilityPermission=$accessibilityPermission")
-
+    // The cursor uses TYPE_ACCESSIBILITY_OVERLAY, so the accessibility service is the only
+    // permission needed; "Display over other apps" is not required.
+    private fun updatePermissionStatus() {
         val statusText = findViewById<TextView>(R.id.status_text)
         val accessibilityButton = findViewById<Button>(R.id.btn_accessibility)
         statusText.visibility = View.VISIBLE
 
-        if (!overlayPermission) {
-            Log.d("TrackpadActivity", "Overlay permission missing")
-            statusText.text = "Overlay permission required"
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivity(intent)
-            }
-        } else if (!accessibilityPermission) {
-            Log.d("TrackpadActivity", "Accessibility permission missing")
-            statusText.text = "Accessibility service required"
+        if (!isAccessibilityServiceEnabled()) {
+            Log.d(TAG, "Accessibility permission missing")
+            statusText.text = getString(R.string.status_needs_accessibility)
             accessibilityButton.visibility = View.VISIBLE
         } else {
-            Log.d("TrackpadActivity", "Permissions OK")
-            statusText.text = "Trackpad Active\nMove finger to control cursor\nTap to click"
+            statusText.text = getString(R.string.status_active)
             accessibilityButton.visibility = View.GONE
         }
     }
@@ -225,8 +259,24 @@ class TrackpadActivity : Activity() {
         val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
         return enabledServices.any {
             it.resolveInfo.serviceInfo.packageName == packageName &&
-            it.resolveInfo.serviceInfo.name == ClickInjectorService::class.java.canonicalName
+                it.resolveInfo.serviceInfo.name == ClickInjectorService::class.java.canonicalName
         }
+    }
+
+    /**
+     * Speed-based pointer acceleration: slow finger movement stays precise, fast flicks
+     * cross a large monitor without repositioning the finger.
+     */
+    private fun pointerGain(rawDx: Float, rawDy: Float, dtMs: Long): Float {
+        if (!accelerationEnabled) return 1f
+        val speed = hypot(rawDx, rawDy) / dtMs.coerceAtLeast(1L)
+        return (1f + (speed - TrackpadConstants.ACCEL_SPEED_THRESHOLD) * TrackpadConstants.ACCEL_FACTOR)
+            .coerceIn(1f, TrackpadConstants.ACCEL_MAX_GAIN)
+    }
+
+    private fun resetTwoFinger() {
+        isTwoFinger = false
+        isScrolling = false
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -236,99 +286,107 @@ class TrackpadActivity : Activity() {
                 startY = event.y
                 lastX = event.x
                 lastY = event.y
-                downTime = System.currentTimeMillis()
+                lastMoveTime = event.eventTime
                 isTap = true
                 isLongPress = false
-                isTwoFinger = false
+                resetTwoFinger()
                 longPressHandler.postDelayed(longPressRunnable, longPressTimeout)
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (event.pointerCount == 2) {
+                // A second finger during a long-press drag must not hijack the in-flight drag stroke
+                if (event.pointerCount == 2 && !isLongPress) {
                     isTwoFinger = true
+                    isScrolling = false
                     isTap = false
-                    isLongPress = false
                     longPressHandler.removeCallbacks(longPressRunnable)
-                    
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START, isScroll = true)
-                    // Feedback
-                    window.decorView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                    
-                    // Reset lastX/lastY to the average of the two fingers for smoother drag start
-                    lastX = (event.getX(0) + event.getX(1)) / 2f
-                    lastY = (event.getY(0) + event.getY(1)) / 2f
+
+                    twoFingerDownTime = event.eventTime
+                    twoFingerStartX = (event.getX(0) + event.getX(1)) / 2f
+                    twoFingerStartY = (event.getY(0) + event.getY(1)) / 2f
+                    lastX = twoFingerStartX
+                    lastY = twoFingerStartY
                 }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                val currentX = if (isTwoFinger && event.pointerCount >= 2) {
-                    (event.getX(0) + event.getX(1)) / 2f
-                } else {
-                    event.x
-                }
-                val currentY = if (isTwoFinger && event.pointerCount >= 2) {
-                    (event.getY(0) + event.getY(1)) / 2f
-                } else {
-                    event.y
-                }
-
-                val dx = (currentX - lastX) * sensitivity
-                val dy = (currentY - lastY) * sensitivity
+                val twoFingerActive = isTwoFinger && event.pointerCount >= 2
+                val currentX = if (twoFingerActive) (event.getX(0) + event.getX(1)) / 2f else event.x
+                val currentY = if (twoFingerActive) (event.getY(0) + event.getY(1)) / 2f else event.y
+                val rawDx = currentX - lastX
+                val rawDy = currentY - lastY
+                val dt = event.eventTime - lastMoveTime
 
                 if (isTwoFinger) {
-                    if (dx != 0f || dy != 0f) {
-                        TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy, isScroll = true)
+                    if (!isScrolling) {
+                        // Only become a scroll once the fingers really move; otherwise it may be a right click
+                        if (hypot(currentX - twoFingerStartX, currentY - twoFingerStartY) > touchSlop) {
+                            isScrolling = true
+                            TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.START, isScroll = true)
+                            haptic(HapticFeedbackConstants.CLOCK_TICK)
+                        }
+                    } else if (rawDx != 0f || rawDy != 0f) {
+                        val dir = if (reverseScroll) -1f else 1f
+                        TrackpadEventBus.sendDragEvent(
+                            TrackpadEventBus.DragAction.MOVE,
+                            rawDx * sensitivity * dir,
+                            rawDy * sensitivity * dir,
+                            isScroll = true
+                        )
                     }
-                } else if (isLongPress) {
-                    if (dx != 0f || dy != 0f) {
+                } else if (rawDx != 0f || rawDy != 0f) {
+                    val gain = pointerGain(rawDx, rawDy, dt)
+                    val dx = rawDx * sensitivity * gain
+                    val dy = rawDy * sensitivity * gain
+                    if (isLongPress) {
                         TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.MOVE, dx, dy, isScroll = false)
-                    }
-                } else {
-                    if (dx != 0f || dy != 0f) {
+                    } else {
                         TrackpadEventBus.sendMoveEvent(dx, dy)
-                    }
-                    
-                    if (isTap && (abs(event.x - startX) > touchSlop || abs(event.y - startY) > touchSlop)) {
-                        isTap = false
-                        longPressHandler.removeCallbacks(longPressRunnable)
+                        if (isTap && (abs(event.x - startX) > touchSlop || abs(event.y - startY) > touchSlop)) {
+                            isTap = false
+                            longPressHandler.removeCallbacks(longPressRunnable)
+                        }
                     }
                 }
-                
+
                 lastX = currentX
                 lastY = currentY
+                lastMoveTime = event.eventTime
                 return true
             }
             MotionEvent.ACTION_POINTER_UP -> {
                 if (isTwoFinger) {
-                    TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
-                    isTwoFinger = false
-                    
-                    // Update lastX/lastY to the remaining finger to prevent jump
-                    val upIndex = event.actionIndex
-                    val remainingIndex = if (upIndex == 0) 1 else 0
-                    if (remainingIndex < event.pointerCount) {
-                        try {
-                            lastX = event.getX(remainingIndex)
-                            lastY = event.getY(remainingIndex)
-                        } catch (e: IllegalArgumentException) {
-                            Log.e("TrackpadActivity", "Error getting pointer coordinates", e)
-                        }
+                    if (isScrolling) {
+                        TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
+                    } else if (event.eventTime - twoFingerDownTime <= TrackpadConstants.TWO_FINGER_TAP_TIMEOUT_MS) {
+                        TrackpadEventBus.sendRightClickEvent()
+                        haptic(HapticFeedbackConstants.CONTEXT_CLICK)
                     }
+                    resetTwoFinger()
+                }
+
+                // Continue tracking from the remaining finger to prevent a cursor jump
+                if (event.pointerCount == 2) {
+                    val remainingIndex = if (event.actionIndex == 0) 1 else 0
+                    lastX = event.getX(remainingIndex)
+                    lastY = event.getY(remainingIndex)
+                    lastMoveTime = event.eventTime
                 }
                 return true
             }
             MotionEvent.ACTION_UP -> {
                 longPressHandler.removeCallbacks(longPressRunnable)
-                
+
                 if (isLongPress) {
                     TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = false)
-                } else if (isTwoFinger) {
+                } else if (isScrolling) {
                     TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
                 } else if (isTap) {
                     TrackpadEventBus.sendTapEvent()
+                    haptic(HapticFeedbackConstants.VIRTUAL_KEY)
                 }
-                
-                isTwoFinger = false
+
+                resetTwoFinger()
                 isLongPress = false
                 return true
             }
@@ -336,10 +394,10 @@ class TrackpadActivity : Activity() {
                 longPressHandler.removeCallbacks(longPressRunnable)
                 if (isLongPress) {
                     TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = false)
-                } else if (isTwoFinger) {
+                } else if (isScrolling) {
                     TrackpadEventBus.sendDragEvent(TrackpadEventBus.DragAction.STOP, isScroll = true)
                 }
-                isTwoFinger = false
+                resetTwoFinger()
                 isLongPress = false
                 return true
             }
@@ -350,5 +408,9 @@ class TrackpadActivity : Activity() {
     override fun onPause() {
         super.onPause()
         longPressHandler.removeCallbacks(longPressRunnable)
+    }
+
+    private companion object {
+        const val TAG = "TrackpadActivity"
     }
 }

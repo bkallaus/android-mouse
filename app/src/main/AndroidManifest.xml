@@ -2,11 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.androidmouse">
 
-    <!-- Permission to draw the fake cursor overlay across the system -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- Permission to run as a foreground service for stability -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- No extra permissions: the cursor is a TYPE_ACCESSIBILITY_OVERLAY owned by the
+         accessibility service, so "Display over other apps" is not required. -->
 
     <application
         android:allowBackup="true"

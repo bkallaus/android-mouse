@@ -42,7 +42,25 @@
         android:id="@+id/dialog_sensitivity_seekbar"
         android:layout_width="match_parent"
         android:layout_height="48dp"
-        android:max="100" />
+        android:max="100"
+        android:layout_marginBottom="32dp" />
+
+    <Switch
+        android:id="@+id/dialog_acceleration_switch"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:text="@string/setting_acceleration"
+        android:textColor="#BBBBBB"
+        android:textSize="16sp" />
+
+    <Switch
+        android:id="@+id/dialog_reverse_scroll_switch"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:layout_marginBottom="16dp"
+        android:text="@string/setting_reverse_scroll"
+        android:textColor="#BBBBBB"
+        android:textSize="16sp" />
 
     <View
         android:layout_width="match_parent"

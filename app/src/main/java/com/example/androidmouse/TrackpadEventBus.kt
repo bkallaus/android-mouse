@@ -17,11 +17,19 @@ object TrackpadEventBus {
     val moveEvents = _moveEvents.asSharedFlow()
 
     // Shared flow to send tap commands from the Trackpad to the Click Injector
+    // Buffer > 1 so a fast double-click is not collapsed into a single tap
     private val _tapEvents = MutableSharedFlow<Unit>(
-        extraBufferCapacity = 1,
+        extraBufferCapacity = 4,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val tapEvents = _tapEvents.asSharedFlow()
+
+    // Right click (two-finger tap), injected as a long-press at the cursor
+    private val _rightClickEvents = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 2,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val rightClickEvents = _rightClickEvents.asSharedFlow()
 
     // Shared flow to send global actions (Back, Home, Recents)
     private val _globalActions = MutableSharedFlow<Int>(
@@ -53,7 +61,7 @@ object TrackpadEventBus {
 
     // Shared flow to send special key events (e.g. Enter, Backspace)
     private val _keyEvents = MutableSharedFlow<Int>(
-        extraBufferCapacity = 1,
+        extraBufferCapacity = 16,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val keyEvents = _keyEvents.asSharedFlow()
@@ -72,6 +80,10 @@ object TrackpadEventBus {
 
     fun sendTapEvent() {
         _tapEvents.tryEmit(Unit)
+    }
+
+    fun sendRightClickEvent() {
+        _rightClickEvents.tryEmit(Unit)
     }
 
     fun sendGlobalAction(action: Int) {

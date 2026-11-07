@@ -2,4 +2,11 @@
 <resources>
     <string name="app_name">Android Mouse</string>
     <string name="accessibility_description">Android Mouse Click Injector</string>
+    <string name="btn_back">Back</string>
+    <string name="btn_home">Home</string>
+    <string name="btn_recents">Recents</string>
+    <string name="setting_acceleration">Pointer acceleration</string>
+    <string name="setting_reverse_scroll">Reverse scroll direction</string>
+    <string name="status_needs_accessibility">Accessibility service required</string>
+    <string name="status_active">Trackpad active\nTap = click · Two-finger tap = right click\nTwo-finger drag = scroll · Hold then drag = drag</string>
 </resources>
