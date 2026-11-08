@@ -54,7 +54,7 @@ object TrackpadEventBus {
 
     // Shared flow to send text to be injected
     private val _textEvents = MutableSharedFlow<String>(
-        extraBufferCapacity = 1,
+        extraBufferCapacity = 8,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     val textEvents = _textEvents.asSharedFlow()

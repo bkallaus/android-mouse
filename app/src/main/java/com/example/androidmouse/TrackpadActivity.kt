@@ -246,10 +246,10 @@ class TrackpadActivity : Activity() {
 
         if (!isAccessibilityServiceEnabled()) {
             Log.d(TAG, "Accessibility permission missing")
-            statusText.text = getString(R.string.status_needs_accessibility)
+            statusText.setText(R.string.status_needs_accessibility)
             accessibilityButton.visibility = View.VISIBLE
         } else {
-            statusText.text = getString(R.string.status_active)
+            statusText.setText(R.string.status_active)
             accessibilityButton.visibility = View.GONE
         }
     }
@@ -261,17 +261,6 @@ class TrackpadActivity : Activity() {
             it.resolveInfo.serviceInfo.packageName == packageName &&
                 it.resolveInfo.serviceInfo.name == ClickInjectorService::class.java.canonicalName
         }
-    }
-
-    /**
-     * Speed-based pointer acceleration: slow finger movement stays precise, fast flicks
-     * cross a large monitor without repositioning the finger.
-     */
-    private fun pointerGain(rawDx: Float, rawDy: Float, dtMs: Long): Float {
-        if (!accelerationEnabled) return 1f
-        val speed = hypot(rawDx, rawDy) / dtMs.coerceAtLeast(1L)
-        return (1f + (speed - TrackpadConstants.ACCEL_SPEED_THRESHOLD) * TrackpadConstants.ACCEL_FACTOR)
-            .coerceIn(1f, TrackpadConstants.ACCEL_MAX_GAIN)
     }
 
     private fun resetTwoFinger() {
@@ -335,7 +324,7 @@ class TrackpadActivity : Activity() {
                         )
                     }
                 } else if (rawDx != 0f || rawDy != 0f) {
-                    val gain = pointerGain(rawDx, rawDy, dt)
+                    val gain = PointerAcceleration.gain(rawDx, rawDy, dt, accelerationEnabled)
                     val dx = rawDx * sensitivity * gain
                     val dy = rawDy * sensitivity * gain
                     if (isLongPress) {

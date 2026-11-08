@@ -247,36 +247,25 @@ class ClickInjectorService : AccessibilityService() {
         }
         // ACTION_SET_TEXT replaces the whole field, so splice the new text in at the caret
         // (replacing any selection) instead of wiping what is already there.
-        val current = editableText(focusedNode)
-        val (start, end) = selectionOf(focusedNode, current.length)
-        val updated = current.substring(0, start) + text + current.substring(end)
-        setTextAndCaret(focusedNode, updated, start + text.length)
+        val edit = TextEdits.insert(
+            editableText(focusedNode), focusedNode.textSelectionStart, focusedNode.textSelectionEnd, text
+        )
+        applyEdit(focusedNode, edit)
         @Suppress("DEPRECATION")
         focusedNode.recycle()
     }
 
     private fun deleteBeforeCursor(node: AccessibilityNodeInfo) {
-        val current = editableText(node)
-        val (start, end) = selectionOf(node, current.length)
-        when {
-            start != end -> setTextAndCaret(node, current.removeRange(start, end), start)
-            start > 0 -> setTextAndCaret(node, current.removeRange(start - 1, start), start - 1)
-        }
+        TextEdits.backspace(editableText(node), node.textSelectionStart, node.textSelectionEnd)
+            ?.let { applyEdit(node, it) }
     }
 
     /** Current editable text of [node], ignoring placeholder hint text. */
     private fun editableText(node: AccessibilityNodeInfo): String =
         if (node.isShowingHintText) "" else node.text?.toString() ?: ""
 
-    /** Selection of [node] clamped to its text; the caret defaults to the end of the field. */
-    private fun selectionOf(node: AccessibilityNodeInfo, length: Int): Pair<Int, Int> {
-        val s = node.textSelectionStart
-        val e = node.textSelectionEnd
-        if (s < 0 || e < 0) return length to length
-        return minOf(s, e).coerceIn(0, length) to maxOf(s, e).coerceIn(0, length)
-    }
-
-    private fun setTextAndCaret(node: AccessibilityNodeInfo, text: String, caret: Int) {
+    private fun applyEdit(node: AccessibilityNodeInfo, edit: TextEdits.Result) {
+        val (text, caret) = edit
         node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         })

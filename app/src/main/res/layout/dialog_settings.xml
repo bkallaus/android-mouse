@@ -9,7 +9,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Settings"
+        android:text="@string/settings_title"
         android:textColor="#FFFFFF"
         android:textSize="28sp"
         android:textStyle="bold"
@@ -18,7 +18,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Target Display"
+        android:text="@string/setting_target_display"
         android:textColor="#BBBBBB"
         android:textSize="16sp"
         android:layout_marginBottom="12dp"/>
@@ -33,7 +33,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Sensitivity"
+        android:text="@string/setting_sensitivity"
         android:textColor="#BBBBBB"
         android:textSize="16sp"
         android:layout_marginBottom="12dp"/>
@@ -73,7 +73,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="end"
-        android:text="Close"
+        android:text="@string/btn_close"
         android:textColor="#FFFFFF" />
 
 </LinearLayout>

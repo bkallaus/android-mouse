@@ -8,7 +8,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text="Trackpad"
+        android:text="@string/trackpad_watermark"
         android:textColor="#333333"
         android:textSize="32sp"
         android:textStyle="bold" />
@@ -56,18 +56,16 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Keyboard"
-                android:src="@drawable/ic_keyboard"
-                android:tint="#FFFFFF" />
+                android:contentDescription="@string/cd_keyboard"
+                android:src="@drawable/ic_keyboard" />
 
             <ImageButton
                 android:id="@+id/btn_settings"
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="Settings"
-                android:src="@drawable/ic_settings"
-                android:tint="#FFFFFF" />
+                android:contentDescription="@string/cd_settings"
+                android:src="@drawable/ic_settings" />
         </LinearLayout>
 
         <!-- Hidden EditText to trigger keyboard -->
@@ -76,6 +74,7 @@
             android:layout_width="1dp"
             android:layout_height="1dp"
             android:alpha="0"
+            android:hint="@string/hidden_input_hint"
             android:importantForAutofill="no"
             android:inputType="textNoSuggestions"
             android:imeOptions="actionSend" />
@@ -94,7 +93,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Enable Accessibility Service"
+            android:text="@string/btn_enable_accessibility"
             android:visibility="gone" />
     </LinearLayout>
 
