@@ -2,6 +2,10 @@
 .gradle
 /local.properties
 /.idea/caches
+/.idea/deploymentTargetSelector.xml
+/.idea/deviceManager.xml
+/.idea/studiobot.xml
+/.idea/markdown.xml
 /.idea/libraries
 /.idea/modules.xml
 /.idea/workspace.xml
