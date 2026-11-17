@@ -1,16 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.androidmouse">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Permission to draw the fake cursor overlay across the system -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- Permission to run as a foreground service for stability -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- No permissions are needed: the cursor is an accessibility overlay window,
+         which only requires the accessibility service below to be enabled. -->
 
     <application
         android:allowBackup="true"
-        android:label="Android Mouse"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar">
 
@@ -19,7 +17,6 @@
             android:name=".TrackpadActivity"
             android:exported="true"
             android:screenOrientation="portrait">
-            <!-- Ensure it stays awake while open programmatically, though can be done here too -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
